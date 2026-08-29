@@ -52,6 +52,11 @@ The HUD title shows whether you're on the latest release; when a newer one exist
 |-----|--------|
 | Enter | Open the chat line while in a session (`ChatKey` in the config to rebind); Enter sends, Esc cancels. Messages fade after 15 s; join/leave and server notices appear as grey lines |
 | F4  | Open the GitHub releases page (the HUD title says whether an update exists) |
+
+While a text box is open the mod disables Rewired's keyboard controller (the game's input system) and RCC's
+car control, so typing never shifts gears, pulls the handbrake or opens menus. `BlockInputWhenUnfocused`
+(default on) applies the same block while the game window is in the background, since the game otherwise
+keeps reacting to keys while you are tabbed out.
 | F5  | Toggle car collisions (persisted as `GhostCollisions`). **Host-controlled in a session** like traffic. On: ghosts are solid and moved through PhysX (`MovePosition`, interpolated) so contacts carry momentum; off: cars pass through each other |
 | F6  | Toggle AI traffic (persisted as `TrafficEnabled`; "off" clears existing traffic and is re-applied on every map load). **Host-controlled in a session:** the host's rule is sent to clients on join and on change; a client's F6 is ignored until it disconnects, then its own setting is restored |
 | F7  | Toggle the in-game HUD (on by default: car, host/client, ghosts, recent log) |

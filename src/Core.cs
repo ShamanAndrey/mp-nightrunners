@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.0", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.1", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -46,6 +46,9 @@ public class Core : MelonMod
     private MelonPreferences_Entry<string> _chatKey = null!;
     private KeyCode _chatKeyCode = KeyCode.Return;
     private bool _controlSuspended;
+    private MelonPreferences_Entry<bool> _blockUnfocused = null!;
+
+    private bool TextBoxOpen => _connectPanel.Open || _chat.InputOpen;
     private CursorLockMode _prevCursorLock;
     private bool _prevCursorVisible;
 
@@ -71,6 +74,7 @@ public class Core : MelonMod
         _connectPassword = cat.CreateEntry("ConnectPassword", "", description: "Password used by F12 (also editable in the connect panel)");
         _chatKey = cat.CreateEntry("ChatKey", "Return", description: "Key that opens the chat line while in a session (Unity KeyCode name: Return, T, Y, ...)");
         if (!System.Enum.TryParse(_chatKey.Value, true, out _chatKeyCode)) _chatKeyCode = KeyCode.Return;
+        _blockUnfocused = cat.CreateEntry("BlockInputWhenUnfocused", true, description: "Stop the game reacting to your keyboard while its window is not focused (the game normally keeps reading keys in the background)");
 
         if (_checkUpdates.Value) _updates.Start(Info.Version);
 
@@ -97,15 +101,20 @@ public class Core : MelonMod
         if (!sceneName.Contains("Chunk")) _ghosts.OnWorldSceneChanged();
     }
 
-    public override void OnApplicationQuit() => Disconnect();
+    public override void OnApplicationQuit()
+    {
+        Disconnect();
+        GameInput.Set(false, Log);
+    }
 
     public override void OnUpdate()
     {
+        // Typing or tabbed out: the game must not see the keyboard (Rewired) and the car must not react.
+        UpdateInputSuspension();
+
         if (_connectPanel.Open)
         {
-            // Typing mode: the car must not react to the keys, our hotkeys stay quiet,
-            // and the game's hidden/locked cursor is forced back so the buttons are usable.
-            SuspendCarControl(true);
+            // Typing mode: our hotkeys stay quiet and the game's hidden/locked cursor is forced back.
             ShowCursor();
             if (_connectPanel.ConnectRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
@@ -120,7 +129,6 @@ public class Core : MelonMod
         }
         else if (_chat.InputOpen)
         {
-            SuspendCarControl(true);
             if (_chat.SendRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
                 _chat.SendRequested = false;
@@ -130,7 +138,6 @@ public class Core : MelonMod
             {
                 _chat.CancelRequested = false;
                 _chat.CloseInput();
-                SuspendCarControl(false);
             }
         }
         else
@@ -344,7 +351,7 @@ public class Core : MelonMod
         _hudLines.Add($"Send:     {sendInfo}");
         var collisionsOn = _hostCollisions ?? _ghostCollisions.Value;
         _hudLines.Add($"Collisions: {(collisionsOn ? "<color=#88ff88>ON — cars are solid</color>" : "off — cars pass through")}   {(CollisionsAreHostControlled ? "<color=#999999>(host-controlled)</color>" : "(F5 toggles)")}");
-        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m");
+        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m    Input: {(GameInput.Suspended ? "<color=#ff9933>game keys paused</color>" : "live")}");
         _hudLines.Add($"Keys:     F11 host   F12 connect   F8 disconnect   {_chatKey.Value} chat   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
 
         _hud.Draw(HudTitle(), _hudLines);
@@ -356,7 +363,6 @@ public class Core : MelonMod
     {
         var text = _chat.Text.Trim();
         _chat.CloseInput();
-        SuspendCarControl(false);
         if (text.Length == 0) return;
         text = Wire.SanitizeChat(text);
         if (_host == null && _client == null) { _chat.AddSystem("not in a session"); return; }
@@ -454,7 +460,6 @@ public class Core : MelonMod
     private void CloseConnectPanel()
     {
         _connectPanel.Close();
-        SuspendCarControl(false);
         Cursor.lockState = _prevCursorLock;
         Cursor.visible = _prevCursorVisible;
     }
@@ -485,8 +490,15 @@ public class Core : MelonMod
         Connect();
     }
 
-    private void SuspendCarControl(bool suspend)
+    /// <summary>
+    /// Two layers: Rewired's keyboard controller (everything the game binds) and RCC's canControl
+    /// (the car), both off while a text box is open or, optionally, while the window is unfocused.
+    /// </summary>
+    private void UpdateInputSuspension()
     {
+        var suspend = TextBoxOpen || (_blockUnfocused.Value && !Application.isFocused);
+        GameInput.Set(suspend, Log);
+
         var rcc = LocalCar.Rcc;
         if (suspend)
         {

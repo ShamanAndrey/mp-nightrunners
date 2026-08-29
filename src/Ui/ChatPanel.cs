@@ -65,7 +65,7 @@ public sealed class ChatPanel
 
         if (visible.Count == 0 && !InputOpen) return;
 
-        var rows = visible.Count + (InputOpen ? 1 : 0);
+        var rows = visible.Count + (InputOpen ? 2 : 0);
         var height = rows * LineH + Pad * 2;
         var x = 10f;
         var y = Screen.height - 10f - height;
@@ -91,6 +91,7 @@ public sealed class ChatPanel
 
         GUI.SetNextControlName(InputControl);
         Text = GUI.TextField(new Rect(x + Pad, ly, Width - Pad * 2, LineH + 2f), Text, 200, _field);
+        GUI.Label(new Rect(x + Pad, ly + LineH + 2f, Width - Pad * 2, LineH), "<color=#a0a0a0>game controls are paused while you type — Enter sends, Esc cancels</color>", _text);
         if (_focusPending || string.IsNullOrEmpty(GUI.GetNameOfFocusedControl()))
         {
             GUI.FocusControl(InputControl);
