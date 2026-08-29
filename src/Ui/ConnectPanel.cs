@@ -14,15 +14,17 @@ public sealed class ConnectPanel
     public bool Open { get; private set; }
     public string Name = "";
     public string Address = "";
+    public string Password = "";
     /// <summary>Set by the Connect button or Enter; Core consumes it.</summary>
     public bool ConnectRequested;
     /// <summary>Set by the Cancel button or Esc; Core consumes it.</summary>
     public bool CancelRequested;
 
-    public void Show(string name, string address)
+    public void Show(string name, string address, string password)
     {
         Name = name;
         Address = address;
+        Password = password;
         ConnectRequested = false;
         CancelRequested = false;
         _focusPending = true;
@@ -45,7 +47,7 @@ public sealed class ConnectPanel
             else if (e.keyCode == KeyCode.Escape) { CancelRequested = true; e.Use(); }
         }
 
-        const float w = 500f, h = 200f;
+        const float w = 500f, h = 238f;
         var x = (Screen.width - w) / 2f;
         var y = (Screen.height - h) / 2f;
 
@@ -58,10 +60,14 @@ public sealed class ConnectPanel
         GUI.Label(new Rect(x + 16f, y + 88f, 120f, 26f), "Host address", _label);
         GUI.SetNextControlName(AddressControl);
         Address = GUI.TextField(new Rect(x + 140f, y + 88f, w - 156f, 26f), Address, 96, _field);
-        GUI.Label(new Rect(x + 140f, y + 116f, w - 156f, 20f), "IP or hostname, optional :port   e.g. 100.99.206.114  or  abc.playit.gg:12345", _hint);
+        GUI.Label(new Rect(x + 140f, y + 116f, w - 156f, 20f), "IP or hostname, optional :port   e.g. 168.231.107.135  or  abc.playit.gg:12345", _hint);
 
-        if (GUI.Button(new Rect(x + 140f, y + 148f, 150f, 32f), "Connect   [Enter]", _button)) ConnectRequested = true;
-        if (GUI.Button(new Rect(x + 300f, y + 148f, 150f, 32f), "Cancel   [Esc]", _button)) CancelRequested = true;
+        GUI.Label(new Rect(x + 16f, y + 142f, 120f, 26f), "Password", _label);
+        Password = GUI.PasswordField(new Rect(x + 140f, y + 142f, w - 156f, 26f), Password, '*', 64, _field);
+        GUI.Label(new Rect(x + 140f, y + 170f, w - 156f, 20f), "leave empty unless the host set one", _hint);
+
+        if (GUI.Button(new Rect(x + 140f, y + 196f, 150f, 32f), "Connect   [Enter]", _button)) ConnectRequested = true;
+        if (GUI.Button(new Rect(x + 300f, y + 196f, 150f, 32f), "Cancel   [Esc]", _button)) CancelRequested = true;
 
         // Keep keyboard focus on the address field so typing always lands somewhere useful.
         if (_focusPending || string.IsNullOrEmpty(GUI.GetNameOfFocusedControl()))

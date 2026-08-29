@@ -58,9 +58,23 @@ public sealed class GhostManager
 
     private Vector3 OffsetFor(int id) => id == _loopbackId ? new Vector3(GhostOffset, 0f, 0f) : Vector3.zero;
 
+    /// <summary>Only models the game actually defines are handed to its spawn coroutine.</summary>
+    private static bool IsKnownModel(int model)
+    {
+        if (model <= 0) return true; // 0 = unknown, resolved to the fallback at spawn time
+        try { return Enum.IsDefined(typeof(car_carOrigin.ModelType), model); }
+        catch { return false; }
+    }
+
     public void OnPlayerJoined(PlayerInfo p)
     {
         if (_cars.ContainsKey(p.Id)) return;
+        if (_cars.Count >= Wire.MaxPlayers) { _log($"[ghosts] ignoring #{p.Id}: too many players"); return; }
+        if (!IsKnownModel(p.Model))
+        {
+            _log($"[ghosts] {p.Name} sent unknown car model {p.Model}; using fallback");
+            p.Model = 0;
+        }
         var car = new RemoteCar(p, _collisions) { LocalOffset = OffsetFor(p.Id), MinDelay = MinInterpDelay };
         _cars[p.Id] = car;
         _spawnQueue.Enqueue(car);

@@ -7,6 +7,7 @@ var collisions = false;
 var bots = 0;
 var max = 32;
 var rate = 25f;
+var password = Environment.GetEnvironmentVariable("NRMP_PASSWORD"); // keeps it out of `ps` output and unit files
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -20,6 +21,7 @@ for (var i = 0; i < args.Length; i++)
         case "--bots": bots = int.Parse(Next()); break;
         case "--max": max = int.Parse(Next()); break;
         case "--rate": rate = float.Parse(Next()); break;
+        case "--password": password = Next(); break;
         case "-h" or "--help":
             Console.WriteLine("""
                 nrmp-server — dedicated relay for the Night Runners MP mod
@@ -29,6 +31,7 @@ for (var i = 0; i < args.Length; i++)
                   --bots N          fake players that orbit the first real player (testing)
                   --max N           player cap (default 32)
                   --rate N          full snapshot rate in Hz (default 25)
+                  --password X      players must enter this to join (or set env NRMP_PASSWORD)
                 Console commands while running: traffic on|off, collisions on|off, bots N, list, quit
                 """);
             return 0;
@@ -38,7 +41,7 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-var server = new RelayServer(port, traffic, collisions) { MaxPlayers = max, FullRateHz = rate };
+var server = new RelayServer(port, traffic, collisions, password) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
 if (!server.Start()) return 1;
 for (var b = 0; b < bots; b++) server.AddBot();
 

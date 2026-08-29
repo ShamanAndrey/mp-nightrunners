@@ -9,8 +9,6 @@ namespace NightRunnersMP.Net;
 
 public abstract class NetSession
 {
-    public const string Key = "NRMP-0.4"; // bump whenever the packet layout changes
-
     public event Action<PlayerInfo>? PlayerJoined;
     public event Action<int>? PlayerLeft;
     public event Action<int, CarState>? StateReceived;
@@ -19,17 +17,35 @@ public abstract class NetSession
     protected readonly EventBasedNetListener Listener = new();
     protected readonly NetManager Net;
     protected readonly NetDataWriter Writer = new();
+    protected readonly string Key;
 
-    protected NetSession(Action<string> log)
+    protected NetSession(Action<string> log, string? password)
     {
         Log = log;
-        Net = new NetManager(Listener) { AutoRecycle = true, DisconnectTimeout = 10000 };
-        Listener.NetworkReceiveEvent += (peer, reader, _, _) => OnReceive(peer, reader);
+        Key = Wire.KeyFor(password);
+        Net = new NetManager(Listener)
+        {
+            AutoRecycle = true,
+            DisconnectTimeout = 10000,
+            UnconnectedMessagesEnabled = false,
+            BroadcastReceiveEnabled = false,
+        };
+        Listener.NetworkReceiveEvent += (peer, reader, _, _) =>
+        {
+            // Anything a remote sends is untrusted: a malformed packet must never take us down.
+            try { OnReceive(peer, reader); }
+            catch (Exception e)
+            {
+                Log($"[net] dropped malformed packet from peer {peer.Id}: {e.GetType().Name}");
+                OnMalformed(peer);
+            }
+        };
     }
 
     public abstract string Status { get; }
     public abstract void SendState(in CarState state);
     protected abstract void OnReceive(NetPeer peer, NetPacketReader reader);
+    protected virtual void OnMalformed(NetPeer peer) { }
 
     // Events are dispatched here, on the game thread, so handlers may touch Unity objects.
     public void Poll() => Net.PollEvents();
@@ -46,11 +62,16 @@ public abstract class NetSession
 /// </summary>
 public sealed class HostSession : NetSession
 {
+    private const float IncomingPacketsPerSecondLimit = 100f; // a client at full rate sends 25
+    private const float ConnectCooldownPerAddress = 2f;       // seconds; slows reconnect spam
+
     private sealed class Client
     {
         public PlayerInfo Info;
         public Vector3 Pos;
         public bool HasPos;
+        public float RateWindowStart;
+        public int RateWindowCount;
         public readonly Dictionary<int, RateGate> GatesBySender = new(); // sender id -> pacing towards this client
 
         public RateGate GateFor(int senderId)
@@ -61,19 +82,30 @@ public sealed class HostSession : NetSession
     }
 
     private readonly Dictionary<NetPeer, Client> _players = new();
+    private readonly Dictionary<string, float> _lastConnectByAddress = new();
     private readonly int _port;
     private PlayerInfo _self;
     private int _nextId = 1;
 
     public float FullRateHz = 25f;
+    public bool HasPassword { get; }
 
-    public HostSession(int port, PlayerInfo self, Action<string> log) : base(log)
+    public HostSession(int port, PlayerInfo self, Action<string> log, string? password = null) : base(log, password)
     {
         _port = port;
         _self = self;
         _self.Id = 0;
+        HasPassword = !string.IsNullOrEmpty(password);
 
-        Listener.ConnectionRequestEvent += req => req.AcceptIfKey(Key);
+        Listener.ConnectionRequestEvent += req =>
+        {
+            if (_players.Count >= Wire.MaxPlayers) { req.Reject(); return; }
+            var addr = req.RemoteEndPoint.Address.ToString();
+            var now = SendRate.Now;
+            if (_lastConnectByAddress.TryGetValue(addr, out var last) && now - last < ConnectCooldownPerAddress) { req.Reject(); return; }
+            _lastConnectByAddress[addr] = now;
+            req.AcceptIfKey(Key);
+        };
         Listener.PeerConnectedEvent += peer => Log($"[host] peer {peer.Id} connected, waiting for Hello");
         Listener.PeerDisconnectedEvent += (peer, info) =>
         {
@@ -88,11 +120,11 @@ public sealed class HostSession : NetSession
     public bool Start()
     {
         var ok = Net.Start(_port);
-        Log(ok ? $"[host] listening on UDP {_port}" : $"[host] FAILED to bind UDP {_port}");
+        Log(ok ? $"[host] listening on UDP {_port}{(HasPassword ? " (password protected)" : "")}" : $"[host] FAILED to bind UDP {_port}");
         return ok;
     }
 
-    public override string Status => Net.IsRunning ? $"hosting on UDP {_port}, {_players.Count} client(s)" : "stopped";
+    public override string Status => Net.IsRunning ? $"hosting on UDP {_port}, {_players.Count} client(s){(HasPassword ? ", password" : "")}" : "stopped";
 
     public void UpdateSelfModel(int model) => _self.Model = model;
 
@@ -141,6 +173,8 @@ public sealed class HostSession : NetSession
         Writer.Reset(); Writer.Put((byte)PacketType.State); Writer.Put(id); state.Write(Writer);
     }
 
+    protected override void OnMalformed(NetPeer peer) => peer.Disconnect();
+
     protected override void OnReceive(NetPeer peer, NetPacketReader reader)
     {
         var type = (PacketType)reader.GetByte();
@@ -148,7 +182,13 @@ public sealed class HostSession : NetSession
         {
             case PacketType.Hello:
             {
-                var info = new PlayerInfo { Id = _nextId++, Name = reader.GetString(), Model = reader.GetInt() };
+                if (_players.ContainsKey(peer)) return; // one identity per connection
+                var info = new PlayerInfo
+                {
+                    Id = _nextId++,
+                    Name = Wire.SanitizeName(reader.GetString(Wire.MaxNameLength * 4)),
+                    Model = reader.GetInt(),
+                };
                 _players[peer] = new Client { Info = info };
                 Log($"[host] {info.Name} joined as #{info.Id} (model {info.Model})");
 
@@ -168,14 +208,21 @@ public sealed class HostSession : NetSession
             case PacketType.State:
             {
                 if (!_players.TryGetValue(peer, out var sender)) return;
+                if (reader.AvailableBytes != 4 + CarState.Size) return; // exact size only
+
+                // Incoming rate cap: protects CPU and stops a client from using us as an amplifier.
+                var now = SendRate.Now;
+                if (now - sender.RateWindowStart >= 1f) { sender.RateWindowStart = now; sender.RateWindowCount = 0; }
+                if (++sender.RateWindowCount > IncomingPacketsPerSecondLimit) return;
+
                 reader.GetInt(); // id claimed by the client is ignored; the host is authoritative
                 var s = CarState.Read(reader);
+                if (!s.Validate()) return;
                 sender.Pos = s.Pos;
                 sender.HasPos = true;
                 RaiseState(sender.Info.Id, s);
 
                 // Relay to every other client, each paced by its distance to the sender.
-                var now = SendRate.Now;
                 var written = false;
                 foreach (var kv in _players)
                 {
@@ -188,6 +235,7 @@ public sealed class HostSession : NetSession
                 }
                 break;
             }
+            // Anything else from a client is ignored.
         }
     }
 }
@@ -202,11 +250,12 @@ public sealed class ClientSession : NetSession
 
     public int MyId { get; private set; } = -1;
     public bool Connected => _server != null && _server.ConnectionState == ConnectionState.Connected;
+    public string? LastDisconnectReason { get; private set; }
 
     /// <summary>Raised with the host's rules (traffic, collisions) whenever the host sends them.</summary>
     public event Action<bool, bool>? RulesReceived;
 
-    public ClientSession(string address, int port, PlayerInfo self, Action<string> log) : base(log)
+    public ClientSession(string address, int port, PlayerInfo self, Action<string> log, string? password = null) : base(log, password)
     {
         _address = address; _port = port; _self = self;
 
@@ -216,7 +265,13 @@ public sealed class ClientSession : NetSession
             Writer.Reset(); Writer.Put((byte)PacketType.Hello); Writer.Put(_self.Name); Writer.Put(_self.Model);
             peer.Send(Writer, DeliveryMethod.ReliableOrdered);
         };
-        Listener.PeerDisconnectedEvent += (_, info) => { Log($"[client] disconnected: {info.Reason}"); _server = null; };
+        Listener.PeerDisconnectedEvent += (_, info) =>
+        {
+            LastDisconnectReason = info.Reason.ToString();
+            var hint = info.Reason == DisconnectReason.ConnectionRejected ? " (version or password mismatch, or server full)" : "";
+            Log($"[client] disconnected: {info.Reason}{hint}");
+            _server = null;
+        };
     }
 
     public void Start()
@@ -244,6 +299,7 @@ public sealed class ClientSession : NetSession
             {
                 MyId = reader.GetInt();
                 var n = reader.GetInt();
+                if (n < 0 || n > Wire.MaxPlayers) throw new InvalidOperationException("bad player count");
                 Log($"[client] welcomed as #{MyId}, {n} player(s) already here");
                 for (var i = 0; i < n; i++) RaiseJoined(PlayerInfo.Read(reader));
                 break;
@@ -256,8 +312,11 @@ public sealed class ClientSession : NetSession
                 break;
             case PacketType.State:
             {
+                if (reader.AvailableBytes != 4 + CarState.Size) return;
                 var id = reader.GetInt();
-                RaiseState(id, CarState.Read(reader));
+                var s = CarState.Read(reader);
+                if (id == MyId || !s.Validate()) return;
+                RaiseState(id, s);
                 break;
             }
             case PacketType.Settings:

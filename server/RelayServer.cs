@@ -6,9 +6,14 @@ namespace NightRunnersMP.Server;
 /// <summary>
 /// Dedicated relay: the same role the in-game host plays, minus a car of its own.
 /// Assigns ids, keeps the player list, relays snapshots paced by distance, owns the session rules.
+/// Everything that arrives from a client is treated as hostile until validated.
 /// </summary>
 public sealed class RelayServer
 {
+    private const float IncomingPacketsPerSecondLimit = 100f; // a client at full rate sends 25
+    private const float ConnectCooldownPerAddress = 2f;       // seconds between accepted connects per IP
+    private const int MalformedPacketsBeforeKick = 3;
+
     private sealed class Player
     {
         public int Id;
@@ -19,6 +24,10 @@ public sealed class RelayServer
         public bool HasPos;
         public Vec3 Pos;
         public long Packets;
+        public int Dropped;
+        public int Malformed;
+        public float RateWindowStart;
+        public int RateWindowCount;
         public readonly Dictionary<int, RateGate> GatesBySender = new();
 
         public RateGate GateFor(int senderId)
@@ -33,6 +42,8 @@ public sealed class RelayServer
     private readonly NetDataWriter _w = new();
     private readonly Dictionary<int, Player> _byId = new();
     private readonly Dictionary<NetPeer, Player> _byPeer = new();
+    private readonly Dictionary<string, float> _lastConnectByAddress = new();
+    private readonly string _key;
     private int _nextId = 1;
     private float _nextBotTick;
 
@@ -41,21 +52,35 @@ public sealed class RelayServer
     public float FullRateHz { get; set; } = 25f;
     public bool Traffic { get; private set; } = true;
     public bool Collisions { get; private set; }
+    public bool HasPassword { get; }
 
     public int PlayerCount => _byPeer.Count;
     public int BotCount => _byId.Values.Count(p => p.Bot != null);
 
-    public RelayServer(int port, bool traffic, bool collisions)
+    public RelayServer(int port, bool traffic, bool collisions, string? password = null)
     {
         Port = port;
         Traffic = traffic;
         Collisions = collisions;
-        _net = new NetManager(_listener) { AutoRecycle = true, DisconnectTimeout = 10000 };
+        HasPassword = !string.IsNullOrEmpty(password);
+        _key = Protocol.KeyFor(password);
+        _net = new NetManager(_listener)
+        {
+            AutoRecycle = true,
+            DisconnectTimeout = 10000,
+            UnconnectedMessagesEnabled = false,
+            BroadcastReceiveEnabled = false,
+        };
 
         _listener.ConnectionRequestEvent += req =>
         {
             if (_byPeer.Count >= MaxPlayers) { req.Reject(); return; }
-            req.AcceptIfKey(Protocol.Key);
+            var addr = req.RemoteEndPoint.Address.ToString();
+            var now = SendRate.Now;
+            if (_lastConnectByAddress.TryGetValue(addr, out var last) && now - last < ConnectCooldownPerAddress) { req.Reject(); return; }
+            _lastConnectByAddress[addr] = now;
+            if (_lastConnectByAddress.Count > 10_000) _lastConnectByAddress.Clear();
+            if (req.AcceptIfKey(_key) == null) Log($"rejected {addr}: wrong version or password");
         };
         _listener.PeerConnectedEvent += peer => Log($"peer {peer.Id} connected from {peer.Address}, waiting for Hello");
         _listener.PeerDisconnectedEvent += (peer, info) =>
@@ -66,13 +91,29 @@ public sealed class RelayServer
             _w.Reset(); _w.Put(Protocol.PlayerLeft); _w.Put(p.Id);
             _net.SendToAll(_w, DeliveryMethod.ReliableOrdered);
         };
-        _listener.NetworkReceiveEvent += (peer, reader, _, _) => OnReceive(peer, reader);
+        _listener.NetworkReceiveEvent += (peer, reader, _, _) =>
+        {
+            try { OnReceive(peer, reader); }
+            catch (Exception e)
+            {
+                // A malformed packet must never take the server down; repeat offenders are dropped.
+                if (_byPeer.TryGetValue(peer, out var p) && ++p.Malformed >= MalformedPacketsBeforeKick)
+                {
+                    Log($"kicking {p.Name} (#{p.Id}): {p.Malformed} malformed packets ({e.GetType().Name})");
+                    peer.Disconnect();
+                }
+                else if (!_byPeer.ContainsKey(peer))
+                {
+                    peer.Disconnect(); // garbage before Hello: no second chance
+                }
+            }
+        };
     }
 
     public bool Start()
     {
         var ok = _net.Start(Port);
-        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, max {MaxPlayers})"
+        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, max {MaxPlayers})"
                : $"FAILED to bind UDP {Port}");
         return ok;
     }
@@ -160,8 +201,15 @@ public sealed class RelayServer
         {
             case Protocol.Hello:
             {
-                var p = new Player { Id = _nextId++, Name = reader.GetString(), Model = reader.GetInt(), Peer = peer };
-                if (string.IsNullOrWhiteSpace(p.Name)) p.Name = $"Player{p.Id}";
+                if (_byPeer.ContainsKey(peer)) return; // one identity per connection
+                var p = new Player
+                {
+                    Id = _nextId++,
+                    Name = Protocol.SanitizeName(reader.GetString(Protocol.MaxNameLength * 4)),
+                    Model = reader.GetInt(),
+                    Peer = peer,
+                };
+                if (p.Model < 0 || p.Model > 1000) p.Model = 0;
                 _byPeer[peer] = p;
                 _byId[p.Id] = p;
                 Log($"{p.Name} (#{p.Id}, model {p.Model}) joined from {peer.Address}. {PlayerCount} player(s) online");
@@ -182,14 +230,20 @@ public sealed class RelayServer
             case Protocol.State:
             {
                 if (!_byPeer.TryGetValue(peer, out var sender)) return;
-                if (reader.AvailableBytes < 4 + Protocol.CarStateSize) return;
+                if (reader.AvailableBytes != 4 + Protocol.CarStateSize) { sender.Dropped++; return; } // exact size only
+
+                // Incoming rate cap: protects CPU and stops a client from using us as an amplifier.
+                var now = SendRate.Now;
+                if (now - sender.RateWindowStart >= 1f) { sender.RateWindowStart = now; sender.RateWindowCount = 0; }
+                if (++sender.RateWindowCount > IncomingPacketsPerSecondLimit) { sender.Dropped++; return; }
+
                 reader.GetInt(); // id claimed by the client; the server is authoritative
                 var raw = reader.GetRemainingBytes();
+                if (!Protocol.ValidateCarState(raw)) { sender.Dropped++; return; }
                 sender.Pos = Vec3.FromBytes(raw, Protocol.PosOffset);
                 sender.HasPos = true;
                 sender.Packets++;
 
-                var now = SendRate.Now;
                 var written = false;
                 foreach (var kv in _byPeer)
                 {
@@ -202,6 +256,7 @@ public sealed class RelayServer
                 }
                 break;
             }
+            // Clients may not send Welcome/PlayerJoined/PlayerLeft/Settings; anything else is ignored.
         }
     }
 
@@ -213,7 +268,8 @@ public sealed class RelayServer
     {
         if (_byId.Count == 0) return "nobody online";
         var lines = _byId.Values.OrderBy(p => p.Id).Select(p =>
-            $"  #{p.Id,-3} {p.Name,-16} model {p.Model,-3} {(p.Bot != null ? "bot" : $"{p.Peer!.Address}  ping {p.Peer.Ping} ms  {p.Packets} pkts")}" +
+            $"  #{p.Id,-3} {p.Name,-24} model {p.Model,-3} " +
+            (p.Bot != null ? "bot" : $"{p.Peer!.Address}  ping {p.Peer.Ping} ms  {p.Packets} pkts, {p.Dropped} dropped") +
             (p.HasPos ? $"  @ ({p.Pos.X:F0}, {p.Pos.Y:F0}, {p.Pos.Z:F0})" : "  (no position yet)"));
         return string.Join('\n', lines);
     }

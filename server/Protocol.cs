@@ -1,8 +1,11 @@
+using System.Text;
+
 namespace NightRunnersMP.Server;
 
 /// <summary>
 /// Wire format shared with the mod (src/Net/Packets.cs). Keep both in sync and bump Key together.
-/// The server never interprets a car snapshot beyond its position; it forwards the raw bytes.
+/// The server never interprets a car snapshot beyond validating it and reading its position;
+/// it forwards the raw bytes.
 /// </summary>
 public static class Protocol
 {
@@ -21,7 +24,46 @@ public static class Protocol
     public const int CarStateSize = 78;
     public const int PosOffset = 4;
 
+    public const int MaxNameLength = 24;
+    public const float MaxCoordinate = 100_000f;
+
     public const byte FlagLowBeam = 1, FlagHighBeam = 2, FlagIndLeft = 4, FlagIndRight = 8, FlagEngine = 16;
+
+    /// <summary>Connection key: protocol version, plus the session password when one is set.</summary>
+    public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Key : $"{Key}|{password}";
+
+    /// <summary>Strips control characters and rich-text brackets, trims, caps length. Never empty.</summary>
+    public static string SanitizeName(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "Player";
+        var sb = new StringBuilder(MaxNameLength);
+        foreach (var ch in raw)
+        {
+            if (ch < ' ' || ch == '' || ch == '<' || ch == '>') continue;
+            sb.Append(ch);
+            if (sb.Length >= MaxNameLength) break;
+        }
+        var s = sb.ToString().Trim();
+        return s.Length == 0 ? "Player" : s;
+    }
+
+    /// <summary>All 19 floats finite, position and speeds within sane bounds, rotation roughly unit length.</summary>
+    public static bool ValidateCarState(byte[] raw)
+    {
+        if (raw.Length != CarStateSize) return false;
+        for (var off = 0; off < 76; off += 4)
+            if (!float.IsFinite(BitConverter.ToSingle(raw, off))) return false;
+
+        var pos = Vec3.FromBytes(raw, PosOffset);
+        if (MathF.Abs(pos.X) > MaxCoordinate || MathF.Abs(pos.Y) > MaxCoordinate || MathF.Abs(pos.Z) > MaxCoordinate) return false;
+
+        var vel = Vec3.FromBytes(raw, 32);
+        if (vel.X * vel.X + vel.Y * vel.Y + vel.Z * vel.Z > 500f * 500f) return false;
+
+        float qx = BitConverter.ToSingle(raw, 16), qy = BitConverter.ToSingle(raw, 20), qz = BitConverter.ToSingle(raw, 24), qw = BitConverter.ToSingle(raw, 28);
+        var len = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+        return len is >= 0.5f and <= 2f;
+    }
 }
 
 public readonly record struct Vec3(float X, float Y, float Z)

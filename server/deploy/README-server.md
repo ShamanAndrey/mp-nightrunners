@@ -31,6 +31,13 @@ Live log: `journalctl -u nrmp-server -f`. Manual copy instead of curl: `scp dist
 Rules are set in `ExecStart` inside the unit file (`--traffic on|off --collisions on|off`); after editing it:
 `sudo systemctl daemon-reload && sudo systemctl restart nrmp-server`.
 
+**Password (optional):** players then need it in the F12 panel.
+```
+echo 'NRMP_PASSWORD=yoursecret' > /opt/nrmp/nrmp.env && chown nrmp:nrmp /opt/nrmp/nrmp.env && chmod 600 /opt/nrmp/nrmp.env
+systemctl restart nrmp-server
+```
+(The unit reads that file; keeping the password out of the command line hides it from `ps`.)
+
 To run it interactively instead (console commands `traffic on|off`, `collisions on|off`, `bots N`, `list`, `quit`):
 ```
 /opt/nrmp/nrmp-server --port 7777 --traffic off

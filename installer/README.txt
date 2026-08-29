@@ -34,7 +34,7 @@ CONFIG   <game>\UserData\MelonPreferences.cfg  ->  [NightRunnersMP]
 
 PROBLEMS
   - "connecting..." forever: wrong address, or the host's firewall blocks UDP 7777.
-  - "disconnected: ConnectionRejected": different mod versions.
+  - "disconnected: ConnectionRejected": different mod versions, wrong password, or the server is full.
   - Log file: <game>\MelonLoader\Latest.log
 
 UNINSTALL

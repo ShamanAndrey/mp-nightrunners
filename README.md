@@ -10,6 +10,8 @@ A multiplayer sync mod for **Night Runners** (PLANET JEM, private alpha), built 
 
 Hosting without port-forwarding: use [playit.gg](https://playit.gg) (UDP tunnel — ngrok does **not** carry UDP), Tailscale, or a LAN. `Uninstall.bat` removes everything again.
 
+Sessions can be password-protected: hosts set `HostPassword` in the config (servers use `--password`), players type it in the F12 panel. See `SECURITY.md` for what is and isn't protected.
+
 The HUD title shows whether you're on the latest release; when a newer one exists, **F4** opens the download page (disable with `CheckForUpdates = false`). Everyone in a session must run the same version.
 
 > **Note:** this repo must never contain game files or game-derived assets. `refs/` holds

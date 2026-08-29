@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.5", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.6", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -39,6 +39,8 @@ public class Core : MelonMod
     private readonly List<string> _hudLines = new();
     private readonly UpdateChecker _updates = new();
     private MelonPreferences_Entry<bool> _checkUpdates = null!;
+    private MelonPreferences_Entry<string> _hostPassword = null!;
+    private MelonPreferences_Entry<string> _connectPassword = null!;
     private readonly ConnectPanel _connectPanel = new();
     private bool _controlSuspended;
     private CursorLockMode _prevCursorLock;
@@ -62,6 +64,8 @@ public class Core : MelonMod
         _ghostCollisions = cat.CreateEntry("GhostCollisions", false, description: "true: remote cars are solid (one-way, like walls). false: cars pass through each other");
         _trafficEnabled = cat.CreateEntry("TrafficEnabled", true, description: "false: AI traffic is switched off and cleared whenever a map loads (F6 toggles)");
         _checkUpdates = cat.CreateEntry("CheckForUpdates", true, description: "Ask GitHub once per launch whether a newer release exists (shown in the HUD title)");
+        _hostPassword = cat.CreateEntry("HostPassword", "", description: "When hosting with F11, players must enter this password to join (empty = open)");
+        _connectPassword = cat.CreateEntry("ConnectPassword", "", description: "Password used by F12 (also editable in the connect panel)");
 
         if (_checkUpdates.Value) _updates.Start(Info.Version);
 
@@ -292,7 +296,7 @@ public class Core : MelonMod
 
         _hudLines.Add(_host != null
             ? $"Host:     <color=#88ff88>{_host.Status}</color>"
-            : $"Host:     off  —  F11 to host on UDP {_hostPort.Value}");
+            : $"Host:     off  —  F11 to host on UDP {_hostPort.Value}{(_hostPassword.Value.Length > 0 ? " (password set)" : "")}");
 
         _hudLines.Add(_client != null
             ? $"Client:   <color=#88ff88>{_client.Status}</color>"
@@ -367,13 +371,13 @@ public class Core : MelonMod
     private PlayerInfo Self()
     {
         var rcc = LocalCar.Rcc;
-        return new PlayerInfo { Id = -1, Name = _playerName.Value, Model = rcc != null ? LocalCar.ModelOf(rcc) : 0 };
+        return new PlayerInfo { Id = -1, Name = Wire.SanitizeName(_playerName.Value), Model = rcc != null ? LocalCar.ModelOf(rcc) : 0 };
     }
 
     private void StartHost()
     {
         if (_host != null) { Log($"Already {_host.Status}"); return; }
-        var host = new HostSession(_hostPort.Value, Self(), Log)
+        var host = new HostSession(_hostPort.Value, Self(), Log, _hostPassword.Value)
         {
             TrafficEnabled = _trafficEnabled.Value,
             CollisionsEnabled = _ghostCollisions.Value,
@@ -392,7 +396,7 @@ public class Core : MelonMod
         var lastAddr = _connectPort.Value == 7777 ? _connectAddress.Value : $"{_connectAddress.Value}:{_connectPort.Value}";
         _prevCursorLock = Cursor.lockState;
         _prevCursorVisible = Cursor.visible;
-        _connectPanel.Show(_playerName.Value, lastAddr);
+        _connectPanel.Show(_playerName.Value, lastAddr, _connectPassword.Value);
     }
 
     private void CloseConnectPanel()
@@ -419,9 +423,10 @@ public class Core : MelonMod
             port = p;
         }
 
-        if (name.Length > 0) _playerName.Value = name;
+        if (name.Length > 0) _playerName.Value = Wire.SanitizeName(name);
         _connectAddress.Value = host;
         _connectPort.Value = port;
+        _connectPassword.Value = _connectPanel.Password.Trim();
         MelonPreferences.Save();
 
         CloseConnectPanel();
@@ -448,7 +453,7 @@ public class Core : MelonMod
         var addr = _connectAddress.Value;
         var loopback = _host != null && (addr == "127.0.0.1" || addr.Equals("localhost", System.StringComparison.OrdinalIgnoreCase));
 
-        var client = new ClientSession(addr, _connectPort.Value, Self(), Log);
+        var client = new ClientSession(addr, _connectPort.Value, Self(), Log, loopback ? _hostPassword.Value : _connectPassword.Value);
         _loopback = loopback;
         if (loopback)
         {

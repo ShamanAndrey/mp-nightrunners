@@ -6,12 +6,31 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=nrmp
+Group=nrmp
 WorkingDirectory=/opt/nrmp
 ExecStart=/opt/nrmp/nrmp-server --port 7777 --traffic off --collisions off
+# Optional password: put NRMP_PASSWORD=yoursecret in /opt/nrmp/nrmp.env (chmod 600, owned by nrmp)
+EnvironmentFile=-/opt/nrmp/nrmp.env
 Restart=always
 RestartSec=3
 # Single-file .NET apps extract native pieces here; keep it writable and persistent.
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/nrmp/.extract
+
+# Sandbox: the process only needs the network and its own extract directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadWritePaths=/opt/nrmp/.extract
+LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target
