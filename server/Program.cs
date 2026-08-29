@@ -8,6 +8,8 @@ var bots = 0;
 var max = 32;
 var rate = 25f;
 var password = Environment.GetEnvironmentVariable("NRMP_PASSWORD"); // keeps it out of `ps` output and unit files
+var banFile = "bans.txt";
+var cmdFile = "admin.cmd";
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -22,6 +24,8 @@ for (var i = 0; i < args.Length; i++)
         case "--max": max = int.Parse(Next()); break;
         case "--rate": rate = float.Parse(Next()); break;
         case "--password": password = Next(); break;
+        case "--bans": banFile = Next(); break;
+        case "--cmdfile": cmdFile = Next(); break;
         case "-h" or "--help":
             Console.WriteLine("""
                 nrmp-server — dedicated relay for the Night Runners MP mod
@@ -32,7 +36,11 @@ for (var i = 0; i < args.Length; i++)
                   --max N           player cap (default 32)
                   --rate N          full snapshot rate in Hz (default 25)
                   --password X      players must enter this to join (or set env NRMP_PASSWORD)
-                Console commands while running: traffic on|off, collisions on|off, bots N, list, quit
+                  --bans FILE       persistent ban list (default bans.txt in the working directory)
+                  --cmdfile FILE    admin command file, read+deleted every 0.5 s (default admin.cmd)
+                Commands (console, or one per line written to the command file):
+                  list | traffic on|off | collisions on|off | bots N | quit
+                  kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans
                 """);
             return 0;
         default:
@@ -41,9 +49,11 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-var server = new RelayServer(port, traffic, collisions, password) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
+var server = new RelayServer(port, traffic, collisions, password, banFile) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
 if (!server.Start()) return 1;
 for (var b = 0; b < bots; b++) server.AddBot();
+var commandFile = new CommandFile(cmdFile);
+RelayServer.Log($"admin: type commands here, or write them to {Path.GetFullPath(cmdFile)}");
 
 // Console commands arrive on a reader thread and are applied on the main loop.
 var commands = new ConcurrentQueue<string>();
@@ -64,10 +74,13 @@ while (running)
 {
     server.Poll();
 
+    foreach (var fileCmd in commandFile.Drain()) { RelayServer.Log($"admin.cmd> {fileCmd}"); commands.Enqueue(fileCmd); }
+
     while (commands.TryDequeue(out var cmd))
     {
         var parts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) continue;
+        var reason = parts.Length > 2 ? string.Join(' ', parts.Skip(2)) : "no reason given";
         switch (parts[0].ToLowerInvariant())
         {
             case "traffic" when parts.Length > 1: server.SetTraffic(parts[1] is "on" or "true" or "1"); break;
@@ -76,9 +89,13 @@ while (running)
                 server.RemoveBots();
                 for (var b = 0; b < n; b++) server.AddBot();
                 break;
-            case "list": Console.WriteLine(server.Describe()); break;
+            case "list": RelayServer.Log("players:\n" + server.Describe()); break;
+            case "kick" when parts.Length > 1: RelayServer.Log(server.Kick(parts[1], reason)); break;
+            case "ban" when parts.Length > 1: RelayServer.Log(server.Ban(parts[1], reason)); break;
+            case "unban" when parts.Length > 1: RelayServer.Log(server.Unban(parts[1])); break;
+            case "bans": RelayServer.Log("bans:\n" + server.Bans.Describe()); break;
             case "quit" or "exit" or "stop": running = false; break;
-            default: Console.WriteLine("commands: traffic on|off, collisions on|off, bots N, list, quit"); break;
+            default: RelayServer.Log("commands: list | traffic on|off | collisions on|off | bots N | kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans | quit"); break;
         }
     }
 

@@ -39,7 +39,7 @@ public static class Protocol
         var sb = new StringBuilder(MaxNameLength);
         foreach (var ch in raw)
         {
-            if (ch < ' ' || ch == '' || ch == '<' || ch == '>') continue;
+            if (ch < ' ' || ch == (char)127 || ch == '<' || ch == '>') continue;
             sb.Append(ch);
             if (sb.Length >= MaxNameLength) break;
         }

@@ -44,8 +44,11 @@ public sealed class RelayServer
     private readonly Dictionary<NetPeer, Player> _byPeer = new();
     private readonly Dictionary<string, float> _lastConnectByAddress = new();
     private readonly string _key;
+    private readonly NetDataWriter _reason = new();
     private int _nextId = 1;
     private float _nextBotTick;
+
+    public BanList Bans { get; }
 
     public int Port { get; }
     public int MaxPlayers { get; set; } = 32;
@@ -57,13 +60,14 @@ public sealed class RelayServer
     public int PlayerCount => _byPeer.Count;
     public int BotCount => _byId.Values.Count(p => p.Bot != null);
 
-    public RelayServer(int port, bool traffic, bool collisions, string? password = null)
+    public RelayServer(int port, bool traffic, bool collisions, string? password = null, string banFile = "bans.txt")
     {
         Port = port;
         Traffic = traffic;
         Collisions = collisions;
         HasPassword = !string.IsNullOrEmpty(password);
         _key = Protocol.KeyFor(password);
+        Bans = new BanList(banFile);
         _net = new NetManager(_listener)
         {
             AutoRecycle = true,
@@ -74,8 +78,9 @@ public sealed class RelayServer
 
         _listener.ConnectionRequestEvent += req =>
         {
-            if (_byPeer.Count >= MaxPlayers) { req.Reject(); return; }
             var addr = req.RemoteEndPoint.Address.ToString();
+            if (Bans.Contains(addr)) { RejectWith(req, "You are banned from this server."); return; }
+            if (_byPeer.Count >= MaxPlayers) { RejectWith(req, "Server is full."); return; }
             var now = SendRate.Now;
             if (_lastConnectByAddress.TryGetValue(addr, out var last) && now - last < ConnectCooldownPerAddress) { req.Reject(); return; }
             _lastConnectByAddress[addr] = now;
@@ -113,10 +118,62 @@ public sealed class RelayServer
     public bool Start()
     {
         var ok = _net.Start(Port);
-        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, max {MaxPlayers})"
+        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, max {MaxPlayers}, {Bans.Count} banned IP(s))"
                : $"FAILED to bind UDP {Port}");
         return ok;
     }
+
+    // ---- moderation --------------------------------------------------------------------------
+
+    private void RejectWith(ConnectionRequest req, string message)
+    {
+        _reason.Reset(); _reason.Put(message);
+        req.Reject(_reason);
+    }
+
+    /// <summary>Resolve "3", "Andrey" or "1.2.3.4" to connected players (bots are never targets).</summary>
+    private List<Player> Resolve(string target)
+    {
+        var real = _byPeer.Values;
+        if (int.TryParse(target, out var id)) return real.Where(p => p.Id == id).ToList();
+        if (BanList.IsIp(target)) return real.Where(p => p.Peer!.Address.ToString() == target).ToList();
+        return real.Where(p => string.Equals(p.Name, target, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    public string Kick(string target, string reason)
+    {
+        var hits = Resolve(target);
+        if (hits.Count == 0) return $"no connected player matches '{target}' (use: list)";
+        foreach (var p in hits)
+        {
+            _reason.Reset(); _reason.Put($"Kicked: {reason}");
+            p.Peer!.Disconnect(_reason);
+            Log($"kicked {p.Name} (#{p.Id}, {p.Peer.Address}): {reason}");
+        }
+        return $"kicked {hits.Count} player(s)";
+    }
+
+    public string Ban(string target, string reason)
+    {
+        var hits = Resolve(target);
+        var ips = hits.Select(p => p.Peer!.Address.ToString()).Distinct().ToList();
+        if (ips.Count == 0)
+        {
+            if (!BanList.IsIp(target)) return $"no connected player matches '{target}'; to ban an offline player give their IP (see the join log)";
+            ips.Add(target);
+        }
+        foreach (var ip in ips) Bans.Add(ip, reason);
+        foreach (var p in hits)
+        {
+            _reason.Reset(); _reason.Put($"Banned: {reason}");
+            p.Peer!.Disconnect(_reason);
+            Log($"banned {p.Name} (#{p.Id}, {p.Peer.Address}): {reason}");
+        }
+        if (hits.Count == 0) Log($"banned {target}: {reason}");
+        return $"banned {string.Join(", ", ips)} ({Bans.Count} total)";
+    }
+
+    public string Unban(string ip) => Bans.Remove(ip) ? $"unbanned {ip}" : $"{ip} was not banned";
 
     public void Stop() => _net.Stop();
 

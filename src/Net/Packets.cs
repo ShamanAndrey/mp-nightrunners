@@ -26,18 +26,21 @@ public static class Wire
     public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Protocol : $"{Protocol}|{password}";
 
     /// <summary>Strips control characters and rich-text brackets, trims, caps length. Never empty.</summary>
-    public static string SanitizeName(string? raw)
+    public static string SanitizeName(string? raw) => SanitizeText(raw, MaxNameLength, "Player");
+
+    /// <summary>Same cleaning for any server-supplied text (kick/ban messages).</summary>
+    public static string SanitizeText(string? raw, int maxLength, string fallback)
     {
-        if (string.IsNullOrEmpty(raw)) return "Player";
-        var sb = new StringBuilder(MaxNameLength);
+        if (string.IsNullOrEmpty(raw)) return fallback;
+        var sb = new StringBuilder(maxLength);
         foreach (var ch in raw)
         {
-            if (ch < ' ' || ch == '' || ch == '<' || ch == '>') continue;
+            if (ch < ' ' || ch == (char)127 || ch == '<' || ch == '>') continue;
             sb.Append(ch);
-            if (sb.Length >= MaxNameLength) break;
+            if (sb.Length >= maxLength) break;
         }
         var s = sb.ToString().Trim();
-        return s.Length == 0 ? "Player" : s;
+        return s.Length == 0 ? fallback : s;
     }
 
     public static bool IsFinite(Vector3 v) => float.IsFinite(v.x) && float.IsFinite(v.y) && float.IsFinite(v.z);

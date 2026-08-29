@@ -43,6 +43,22 @@ To run it interactively instead (console commands `traffic on|off`, `collisions 
 /opt/nrmp/nrmp-server --port 7777 --traffic off
 ```
 
+## Moderation (kick / ban)
+
+Commands work in the console **or** by writing them to `/opt/nrmp/admin.cmd` (read and deleted within
+half a second; results go to the journal), which is how you moderate a systemd-run server:
+```
+echo "list" > /opt/nrmp/admin.cmd                 # ids, names, IPs, pings
+echo "kick 3 calm down" > /opt/nrmp/admin.cmd     # by id, name, or IP
+echo "ban 3 ramming everyone" > /opt/nrmp/admin.cmd
+echo "ban 203.0.113.9 known griefer" > /opt/nrmp/admin.cmd   # offline player, by IP from the join log
+echo "unban 203.0.113.9" > /opt/nrmp/admin.cmd
+echo "bans" > /opt/nrmp/admin.cmd
+journalctl -u nrmp-server -n 20 --no-pager
+```
+Bans persist in `/opt/nrmp/bans.txt` (editable by hand; one IP per line). Kicked/banned players see the
+reason in their HUD; banned IPs are refused at connect.
+
 ## Notes
 - UDP 7777 must be open in **both** the OS firewall (ufw) and the provider's firewall panel (Hostinger: VPS → Firewall).
 - Protocol key `NRMP-0.4`: players on a different mod version are rejected at connect ("ConnectionRejected").

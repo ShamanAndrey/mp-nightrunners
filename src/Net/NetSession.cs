@@ -268,7 +268,16 @@ public sealed class ClientSession : NetSession
         Listener.PeerDisconnectedEvent += (_, info) =>
         {
             LastDisconnectReason = info.Reason.ToString();
-            var hint = info.Reason == DisconnectReason.ConnectionRejected ? " (version or password mismatch, or server full)" : "";
+            // Servers attach a human-readable message when they kick, ban, or reject us.
+            string? message = null;
+            try
+            {
+                if (info.AdditionalData != null && info.AdditionalData.AvailableBytes > 0)
+                    message = Wire.SanitizeName(info.AdditionalData.GetString(200));
+            }
+            catch { /* not ours to worry about */ }
+            var hint = message != null ? $" — {message}"
+                     : info.Reason == DisconnectReason.ConnectionRejected ? " (version or password mismatch, or server full)" : "";
             Log($"[client] disconnected: {info.Reason}{hint}");
             _server = null;
         };

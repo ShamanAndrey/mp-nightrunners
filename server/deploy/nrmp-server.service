@@ -15,6 +15,7 @@ Restart=always
 RestartSec=3
 # Single-file .NET apps extract native pieces here; keep it writable and persistent.
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/nrmp/.extract
+# bans.txt and admin.cmd live in WorkingDirectory (/opt/nrmp). Admin: echo "ban 3 spamming" > /opt/nrmp/admin.cmd
 
 # Sandbox: the process only needs the network and its own extract directory.
 NoNewPrivileges=true
@@ -29,7 +30,7 @@ RestrictAddressFamilies=AF_INET AF_INET6
 RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=false
-ReadWritePaths=/opt/nrmp/.extract
+ReadWritePaths=/opt/nrmp
 LimitNOFILE=4096
 
 [Install]

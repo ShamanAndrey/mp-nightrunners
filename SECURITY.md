@@ -29,7 +29,8 @@ system information, nothing from the game save.
   positions and names — and the session password, which travels inside the connection request. Treat the
   password as "keeps strangers out", not as a secret against someone sniffing your network. Given what is
   transmitted, this is an accepted trade-off; DTLS-style encryption is possible later if ever needed.
-- Anyone who can reach the port and knows the password can join; there are no accounts or bans yet.
+- Anyone who can reach the port and knows the password can join; there are no accounts. Operators can
+  `kick`/`ban` (persistent IP ban list) from the server console or the admin command file.
 - Everyone in a session must run the same mod version (the protocol key rejects mismatches).
 
 Report issues via GitHub issues on this repository.
