@@ -12,6 +12,13 @@ public abstract class NetSession
     public event Action<PlayerInfo>? PlayerJoined;
     public event Action<int>? PlayerLeft;
     public event Action<int, CarState>? StateReceived;
+    /// <summary>(senderId, text) — senderId is Wire.SystemSenderId for server notices.</summary>
+    public event Action<int, string>? ChatReceived;
+
+    protected const float ChatMinInterval = 0.5f; // seconds between our own messages
+    protected float LastChatSentAt = float.NegativeInfinity;
+
+    public abstract void SendChat(string text);
 
     protected readonly Action<string> Log;
     protected readonly EventBasedNetListener Listener = new();
@@ -54,6 +61,12 @@ public abstract class NetSession
     protected void RaiseJoined(PlayerInfo p) => PlayerJoined?.Invoke(p);
     protected void RaiseLeft(int id) => PlayerLeft?.Invoke(id);
     protected void RaiseState(int id, in CarState s) => StateReceived?.Invoke(id, s);
+    protected void RaiseChat(int id, string text) => ChatReceived?.Invoke(id, text);
+
+    protected void WriteChat(int senderId, string text)
+    {
+        Writer.Reset(); Writer.Put((byte)PacketType.Chat); Writer.Put(senderId); Writer.Put(text);
+    }
 }
 
 /// <summary>
@@ -72,6 +85,8 @@ public sealed class HostSession : NetSession
         public bool HasPos;
         public float RateWindowStart;
         public int RateWindowCount;
+        public float ChatWindowStart;
+        public int ChatWindowCount;
         public readonly Dictionary<int, RateGate> GatesBySender = new(); // sender id -> pacing towards this client
 
         public RateGate GateFor(int senderId)
@@ -173,6 +188,18 @@ public sealed class HostSession : NetSession
         Writer.Reset(); Writer.Put((byte)PacketType.State); Writer.Put(id); state.Write(Writer);
     }
 
+    /// <summary>The host's own chat line, delivered to every client as sender 0.</summary>
+    public override void SendChat(string text)
+    {
+        text = Wire.SanitizeChat(text);
+        if (text.Length == 0 || _players.Count == 0) return;
+        var now = SendRate.Now;
+        if (now - LastChatSentAt < ChatMinInterval) return;
+        LastChatSentAt = now;
+        WriteChat(0, text);
+        Net.SendToAll(Writer, DeliveryMethod.ReliableOrdered);
+    }
+
     protected override void OnMalformed(NetPeer peer) => peer.Disconnect();
 
     protected override void OnReceive(NetPeer peer, NetPacketReader reader)
@@ -233,6 +260,23 @@ public sealed class HostSession : NetSession
                     if (!written) { WriteState(sender.Info.Id, s); written = true; }
                     kv.Key.Send(Writer, DeliveryMethod.Unreliable);
                 }
+                break;
+            }
+            case PacketType.Chat:
+            {
+                if (!_players.TryGetValue(peer, out var sender)) return;
+                reader.GetInt(); // claimed id ignored
+                var text = Wire.SanitizeChat(reader.GetString(Wire.MaxChatLength * 4));
+                if (text.Length == 0) return;
+
+                // 3 messages per 2 seconds per player; excess is silently dropped.
+                var now = SendRate.Now;
+                if (now - sender.ChatWindowStart >= 2f) { sender.ChatWindowStart = now; sender.ChatWindowCount = 0; }
+                if (++sender.ChatWindowCount > 3) return;
+
+                RaiseChat(sender.Info.Id, text);
+                WriteChat(sender.Info.Id, text);
+                Net.SendToAll(Writer, DeliveryMethod.ReliableOrdered, peer);
                 break;
             }
             // Anything else from a client is ignored.
@@ -299,6 +343,17 @@ public sealed class ClientSession : NetSession
         _server!.Send(Writer, DeliveryMethod.Unreliable);
     }
 
+    public override void SendChat(string text)
+    {
+        text = Wire.SanitizeChat(text);
+        if (text.Length == 0 || !Connected) return;
+        var now = SendRate.Now;
+        if (now - LastChatSentAt < ChatMinInterval) return;
+        LastChatSentAt = now;
+        WriteChat(MyId, text);
+        _server!.Send(Writer, DeliveryMethod.ReliableOrdered);
+    }
+
     protected override void OnReceive(NetPeer peer, NetPacketReader reader)
     {
         var type = (PacketType)reader.GetByte();
@@ -333,6 +388,13 @@ public sealed class ClientSession : NetSession
                 var traffic = reader.GetBool();
                 var collisions = reader.GetBool();
                 RulesReceived?.Invoke(traffic, collisions);
+                break;
+            }
+            case PacketType.Chat:
+            {
+                var id = reader.GetInt();
+                var text = Wire.SanitizeChat(reader.GetString(Wire.MaxChatLength * 4));
+                if (text.Length > 0 && id != MyId) RaiseChat(id, text);
                 break;
             }
         }

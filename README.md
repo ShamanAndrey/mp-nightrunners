@@ -50,6 +50,7 @@ The HUD title shows whether you're on the latest release; when a newer one exist
 
 | Key | Action |
 |-----|--------|
+| Enter | Open the chat line while in a session (`ChatKey` in the config to rebind); Enter sends, Esc cancels. Messages fade after 15 s; join/leave and server notices appear as grey lines |
 | F4  | Open the GitHub releases page (the HUD title says whether an update exists) |
 | F5  | Toggle car collisions (persisted as `GhostCollisions`). **Host-controlled in a session** like traffic. On: ghosts are solid and moved through PhysX (`MovePosition`, interpolated) so contacts carry momentum; off: cars pass through each other |
 | F6  | Toggle AI traffic (persisted as `TrafficEnabled`; "off" clears existing traffic and is re-applied on every map load). **Host-controlled in a session:** the host's rule is sent to clients on join and on change; a client's F6 is ignored until it disconnects, then its own setting is restored |
@@ -86,7 +87,8 @@ Snapshots are sampled in the sender's `FixedUpdate` and stamped with `Time.fixed
 `nrmp-server` is a standalone relay that plays the host role without a car: players connect *out* to
 it (F12 → its address), so nobody port-forwards or uses a VPN. It assigns ids, relays snapshots paced
 by distance, owns the traffic/collision rules (`--traffic on|off --collisions on|off`, or console
-commands at runtime), and can spawn `--bots N` fake players that orbit you for solo testing.
+commands at runtime), can spawn `--bots N` fake players that orbit you for solo testing, and supports
+`kick` / `ban` / `unban` with a persistent ban list — from the console or via `admin.cmd` under systemd.
 `.\tools\publish-server.ps1` produces single-file binaries in `dist\server\` (Linux + Windows);
 `server\deploy\README-server.md` has the VPS install steps (systemd unit included).
 It shares no code with the mod — `server/Protocol.cs` mirrors `src/Net/Packets.cs`; change both together.

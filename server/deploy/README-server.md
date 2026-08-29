@@ -54,6 +54,7 @@ echo "ban 3 ramming everyone" > /opt/nrmp/admin.cmd
 echo "ban 203.0.113.9 known griefer" > /opt/nrmp/admin.cmd   # offline player, by IP from the join log
 echo "unban 203.0.113.9" > /opt/nrmp/admin.cmd
 echo "bans" > /opt/nrmp/admin.cmd
+echo "say Server restarts in 5 minutes" > /opt/nrmp/admin.cmd   # notice in everyone's chat
 journalctl -u nrmp-server -n 20 --no-pager
 ```
 Bans persist in `/opt/nrmp/bans.txt` (editable by hand; one IP per line). Kicked/banned players see the

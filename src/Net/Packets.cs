@@ -12,13 +12,16 @@ public enum PacketType : byte
     PlayerLeft = 4,   // host -> all
     State = 5,        // both directions; host stamps the sender id when relaying
     Settings = 6,     // host -> client: session rules (traffic, collisions); sent on join and on change
+    Chat = 7,         // both: senderId (int, stamped by host; -1 = system notice), text (string)
 }
 
 /// <summary>Limits and sanitisers applied to everything that arrives from the network.</summary>
 public static class Wire
 {
-    public const string Protocol = "NRMP-0.4";
+    public const string Protocol = "NRMP-0.5";
     public const int MaxNameLength = 24;
+    public const int MaxChatLength = 200;
+    public const int SystemSenderId = -1;
     public const int MaxPlayers = 32;
     public const float MaxCoordinate = 100_000f; // metres; the map is a few km across
 
@@ -27,6 +30,9 @@ public static class Wire
 
     /// <summary>Strips control characters and rich-text brackets, trims, caps length. Never empty.</summary>
     public static string SanitizeName(string? raw) => SanitizeText(raw, MaxNameLength, "Player");
+
+    /// <summary>Chat lines: same cleaning, longer cap; an empty result means "drop it".</summary>
+    public static string SanitizeChat(string? raw) => SanitizeText(raw, MaxChatLength, "");
 
     /// <summary>Same cleaning for any server-supplied text (kick/ban messages).</summary>
     public static string SanitizeText(string? raw, int maxLength, string fallback)

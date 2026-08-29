@@ -19,6 +19,8 @@ system information, nothing from the game save.
 - Per-client incoming rate limit (100 packets/s) and per-address connect cooldown on the server and the
   in-game host; outgoing rates are distance-paced, so a client cannot use the server as an amplifier.
 - One identity per connection; ids are assigned by the server and never trusted from clients.
+- Chat: sanitised like names (no markup/control characters), 200 characters, 3 messages per 2 s per
+  player, logged on the server for moderation.
 - Optional session password (`--password` / `NRMP_PASSWORD` on the server, `HostPassword` for F11);
   the relay service runs as an unprivileged user in a systemd sandbox.
 - The update check only reads GitHub's redirect and only ever opens the hardcoded releases URL.

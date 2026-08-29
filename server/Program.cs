@@ -41,6 +41,7 @@ for (var i = 0; i < args.Length; i++)
                 Commands (console, or one per line written to the command file):
                   list | traffic on|off | collisions on|off | bots N | quit
                   kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans
+                  say <message>     server notice in everyone's chat
                 """);
             return 0;
         default:
@@ -94,8 +95,9 @@ while (running)
             case "ban" when parts.Length > 1: RelayServer.Log(server.Ban(parts[1], reason)); break;
             case "unban" when parts.Length > 1: RelayServer.Log(server.Unban(parts[1])); break;
             case "bans": RelayServer.Log("bans:\n" + server.Bans.Describe()); break;
+            case "say" when parts.Length > 1: RelayServer.Log(server.Say(string.Join(' ', parts.Skip(1)))); break;
             case "quit" or "exit" or "stop": running = false; break;
-            default: RelayServer.Log("commands: list | traffic on|off | collisions on|off | bots N | kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans | quit"); break;
+            default: RelayServer.Log("commands: list | traffic on|off | collisions on|off | bots N | kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans | say <msg> | quit"); break;
         }
     }
 

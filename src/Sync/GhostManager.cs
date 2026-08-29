@@ -41,6 +41,7 @@ public sealed class GhostManager
 
     public int Count => _cars.Count;
     public IEnumerable<RemoteCar> Cars => _cars.Values;
+    public string? NameOf(int id) => _cars.TryGetValue(id, out var car) ? car.Info.Name : null;
 
     /// <summary>Id of our own loopback client (solo testing); that ghost gets the sideways offset.</summary>
     public int LoopbackId

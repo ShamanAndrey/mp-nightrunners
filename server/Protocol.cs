@@ -9,7 +9,7 @@ namespace NightRunnersMP.Server;
 /// </summary>
 public static class Protocol
 {
-    public const string Key = "NRMP-0.4";
+    public const string Key = "NRMP-0.5";
 
     public const byte Hello = 1;        // client -> server: name (string), model (int)
     public const byte Welcome = 2;      // server -> client: yourId (int), count (int), PlayerInfo[count]
@@ -17,6 +17,7 @@ public static class Protocol
     public const byte PlayerLeft = 4;   // server -> all: id (int)
     public const byte State = 5;        // both: id (int), CarState (78 bytes)
     public const byte Settings = 6;     // server -> client: traffic (bool), collisions (bool)
+    public const byte Chat = 7;         // both: senderId (int, stamped by server; -1 = system notice), text (string)
 
     // CarState layout, little-endian floats unless noted:
     //   0 T | 4 Pos.xyz | 16 Rot.xyzw | 32 Vel.xyz | 44 AngVel.xyz
@@ -25,6 +26,8 @@ public static class Protocol
     public const int PosOffset = 4;
 
     public const int MaxNameLength = 24;
+    public const int MaxChatLength = 200;
+    public const int SystemSenderId = -1;
     public const float MaxCoordinate = 100_000f;
 
     public const byte FlagLowBeam = 1, FlagHighBeam = 2, FlagIndLeft = 4, FlagIndRight = 8, FlagEngine = 16;
@@ -33,18 +36,23 @@ public static class Protocol
     public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Key : $"{Key}|{password}";
 
     /// <summary>Strips control characters and rich-text brackets, trims, caps length. Never empty.</summary>
-    public static string SanitizeName(string? raw)
+    public static string SanitizeName(string? raw) => SanitizeText(raw, MaxNameLength, "Player");
+
+    /// <summary>Chat lines: same cleaning, longer cap; an empty result means "drop it".</summary>
+    public static string SanitizeChat(string? raw) => SanitizeText(raw, MaxChatLength, "");
+
+    public static string SanitizeText(string? raw, int maxLength, string fallback)
     {
-        if (string.IsNullOrEmpty(raw)) return "Player";
-        var sb = new StringBuilder(MaxNameLength);
+        if (string.IsNullOrEmpty(raw)) return fallback;
+        var sb = new StringBuilder(maxLength);
         foreach (var ch in raw)
         {
             if (ch < ' ' || ch == (char)127 || ch == '<' || ch == '>') continue;
             sb.Append(ch);
-            if (sb.Length >= MaxNameLength) break;
+            if (sb.Length >= maxLength) break;
         }
         var s = sb.ToString().Trim();
-        return s.Length == 0 ? "Player" : s;
+        return s.Length == 0 ? fallback : s;
     }
 
     /// <summary>All 19 floats finite, position and speeds within sane bounds, rotation roughly unit length.</summary>

@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.7", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.0", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -42,6 +42,9 @@ public class Core : MelonMod
     private MelonPreferences_Entry<string> _hostPassword = null!;
     private MelonPreferences_Entry<string> _connectPassword = null!;
     private readonly ConnectPanel _connectPanel = new();
+    private readonly ChatPanel _chat = new();
+    private MelonPreferences_Entry<string> _chatKey = null!;
+    private KeyCode _chatKeyCode = KeyCode.Return;
     private bool _controlSuspended;
     private CursorLockMode _prevCursorLock;
     private bool _prevCursorVisible;
@@ -66,6 +69,8 @@ public class Core : MelonMod
         _checkUpdates = cat.CreateEntry("CheckForUpdates", true, description: "Ask GitHub once per launch whether a newer release exists (shown in the HUD title)");
         _hostPassword = cat.CreateEntry("HostPassword", "", description: "When hosting with F11, players must enter this password to join (empty = open)");
         _connectPassword = cat.CreateEntry("ConnectPassword", "", description: "Password used by F12 (also editable in the connect panel)");
+        _chatKey = cat.CreateEntry("ChatKey", "Return", description: "Key that opens the chat line while in a session (Unity KeyCode name: Return, T, Y, ...)");
+        if (!System.Enum.TryParse(_chatKey.Value, true, out _chatKeyCode)) _chatKeyCode = KeyCode.Return;
 
         if (_checkUpdates.Value) _updates.Start(Info.Version);
 
@@ -113,8 +118,24 @@ public class Core : MelonMod
                 CloseConnectPanel();
             }
         }
+        else if (_chat.InputOpen)
+        {
+            SuspendCarControl(true);
+            if (_chat.SendRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            {
+                _chat.SendRequested = false;
+                SendChatFromPanel();
+            }
+            else if (_chat.CancelRequested || Input.GetKeyDown(KeyCode.Escape))
+            {
+                _chat.CancelRequested = false;
+                _chat.CloseInput();
+                SuspendCarControl(false);
+            }
+        }
         else
         {
+            if ((_host != null || _client != null) && Input.GetKeyDown(_chatKeyCode)) _chat.OpenInput();
             if (Input.GetKeyDown(KeyCode.F4)) OpenDownloadPage();
             if (Input.GetKeyDown(KeyCode.F5)) ToggleCollisions();
             if (Input.GetKeyDown(KeyCode.F6)) ToggleTraffic();
@@ -324,10 +345,42 @@ public class Core : MelonMod
         var collisionsOn = _hostCollisions ?? _ghostCollisions.Value;
         _hudLines.Add($"Collisions: {(collisionsOn ? "<color=#88ff88>ON — cars are solid</color>" : "off — cars pass through")}   {(CollisionsAreHostControlled ? "<color=#999999>(host-controlled)</color>" : "(F5 toggles)")}");
         _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m");
-        _hudLines.Add("Keys:     F11 host   F12 connect   F8 disconnect   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
+        _hudLines.Add($"Keys:     F11 host   F12 connect   F8 disconnect   {_chatKey.Value} chat   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
 
         _hud.Draw(HudTitle(), _hudLines);
+        _chat.Draw();
         _connectPanel.Draw();
+    }
+
+    private void SendChatFromPanel()
+    {
+        var text = _chat.Text.Trim();
+        _chat.CloseInput();
+        SuspendCarControl(false);
+        if (text.Length == 0) return;
+        text = Wire.SanitizeChat(text);
+        if (_host == null && _client == null) { _chat.AddSystem("not in a session"); return; }
+        _host?.SendChat(text);
+        if (!_loopback) _client?.SendChat(text);
+        _chat.AddPlayer(Wire.SanitizeName(_playerName.Value), text, own: true);
+    }
+
+    private void OnChat(int senderId, string text)
+    {
+        var name = senderId == Wire.SystemSenderId ? null : _ghosts.NameOf(senderId) ?? $"#{senderId}";
+        if (name == null) _chat.AddSystem(text);
+        else _chat.AddPlayer(name, text);
+    }
+
+    private void WireSessionEvents(NetSession session)
+    {
+        // Chat/join notices first so PlayerLeft still resolves the name before the ghost is removed.
+        session.PlayerJoined += p => _chat.AddSystem($"{p.Name} joined");
+        session.PlayerLeft += id => _chat.AddSystem($"{_ghosts.NameOf(id) ?? $"#{id}"} left");
+        session.ChatReceived += OnChat;
+        session.PlayerJoined += _ghosts.OnPlayerJoined;
+        session.PlayerLeft += _ghosts.OnPlayerLeft;
+        session.StateReceived += (id, s) => _ghosts.OnState(id, s);
     }
 
     private string HudTitle()
@@ -384,10 +437,9 @@ public class Core : MelonMod
             FullRateHz = Mathf.Max(1, _sendRateHz.Value),
         };
         if (!host.Start()) return;
-        host.PlayerJoined += _ghosts.OnPlayerJoined;
-        host.PlayerLeft += _ghosts.OnPlayerLeft;
-        host.StateReceived += (id, s) => _ghosts.OnState(id, s);
+        WireSessionEvents(host);
         _host = host;
+        _chat.AddSystem($"hosting on UDP {_hostPort.Value} — Enter opens chat");
     }
 
     private void OpenConnectPanel()
@@ -463,10 +515,9 @@ public class Core : MelonMod
         }
         else
         {
-            client.PlayerJoined += _ghosts.OnPlayerJoined;
-            client.PlayerLeft += _ghosts.OnPlayerLeft;
-            client.StateReceived += (id, s) => _ghosts.OnState(id, s);
+            WireSessionEvents(client);
             client.RulesReceived += OnHostRules;
+            _chat.AddSystem($"connecting to {addr} — Enter opens chat");
         }
         client.Start();
         _client = client;
@@ -482,6 +533,8 @@ public class Core : MelonMod
         _loopback = false;
         _ghosts.Clear();
         ReleaseHostRules();
+        _chat.CloseInput();
+        _chat.AddSystem("disconnected");
         Log("Disconnected; ghosts removed.");
     }
 

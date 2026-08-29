@@ -28,6 +28,8 @@ public sealed class RelayServer
         public int Malformed;
         public float RateWindowStart;
         public int RateWindowCount;
+        public float ChatWindowStart;
+        public int ChatWindowCount;
         public readonly Dictionary<int, RateGate> GatesBySender = new();
 
         public RateGate GateFor(int senderId)
@@ -175,6 +177,21 @@ public sealed class RelayServer
 
     public string Unban(string ip) => Bans.Remove(ip) ? $"unbanned {ip}" : $"{ip} was not banned";
 
+    /// <summary>Server notice to everyone (shown as a system line).</summary>
+    public string Say(string text)
+    {
+        text = Protocol.SanitizeChat(text);
+        if (text.Length == 0) return "nothing to say";
+        WriteChat(Protocol.SystemSenderId, text);
+        _net.SendToAll(_w, DeliveryMethod.ReliableOrdered);
+        return $"[chat] SERVER: {text}";
+    }
+
+    private void WriteChat(int senderId, string text)
+    {
+        _w.Reset(); _w.Put(Protocol.Chat); _w.Put(senderId); _w.Put(text);
+    }
+
     public void Stop() => _net.Stop();
 
     public void Poll()
@@ -311,6 +328,23 @@ public sealed class RelayServer
                     if (!written) { _w.Reset(); _w.Put(Protocol.State); _w.Put(sender.Id); _w.Put(raw); written = true; }
                     kv.Key.Send(_w, DeliveryMethod.Unreliable);
                 }
+                break;
+            }
+            case Protocol.Chat:
+            {
+                if (!_byPeer.TryGetValue(peer, out var sender)) return;
+                reader.GetInt(); // claimed id ignored
+                var text = Protocol.SanitizeChat(reader.GetString(Protocol.MaxChatLength * 4));
+                if (text.Length == 0) return;
+
+                // 3 messages per 2 seconds per player; excess is silently dropped.
+                var now = SendRate.Now;
+                if (now - sender.ChatWindowStart >= 2f) { sender.ChatWindowStart = now; sender.ChatWindowCount = 0; }
+                if (++sender.ChatWindowCount > 3) { sender.Dropped++; return; }
+
+                Log($"[chat] {sender.Name} (#{sender.Id}): {text}");
+                WriteChat(sender.Id, text);
+                _net.SendToAll(_w, DeliveryMethod.ReliableOrdered, peer);
                 break;
             }
             // Clients may not send Welcome/PlayerJoined/PlayerLeft/Settings; anything else is ignored.
