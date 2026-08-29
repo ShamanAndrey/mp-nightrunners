@@ -10,6 +10,8 @@ var rate = 25f;
 var password = Environment.GetEnvironmentVariable("NRMP_PASSWORD"); // keeps it out of `ps` output and unit files
 var banFile = "bans.txt";
 var cmdFile = "admin.cmd";
+var filter = false;
+var wordsFile = "badwords.txt";
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -26,6 +28,8 @@ for (var i = 0; i < args.Length; i++)
         case "--password": password = Next(); break;
         case "--bans": banFile = Next(); break;
         case "--cmdfile": cmdFile = Next(); break;
+        case "--filter": filter = OnOff(Next()); break;
+        case "--badwords": wordsFile = Next(); break;
         case "-h" or "--help":
             Console.WriteLine("""
                 nrmp-server — dedicated relay for the Night Runners MP mod
@@ -38,16 +42,27 @@ for (var i = 0; i < args.Length; i++)
                   --password X      players must enter this to join (or set env NRMP_PASSWORD)
                   --bans FILE       persistent ban list (default bans.txt in the working directory)
                   --cmdfile FILE    admin command file, read+deleted every 0.5 s (default admin.cmd)
+                  --filter on|off   mask profanity in names and chat for everyone (default off)
+                  --badwords FILE   extra words for the filter, one per line, trailing * = prefix (default badwords.txt)
                 Commands (console, or one per line written to the command file):
                   list | traffic on|off | collisions on|off | bots N | quit
                   kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans
                   say <message>     server notice in everyone's chat
+                  filter on|off     toggle the word filter at runtime
                 """);
             return 0;
         default:
             Console.Error.WriteLine($"unknown argument {args[i]} (try --help)");
             return 2;
     }
+}
+
+Protocol.Filter.Enabled = filter;
+if (File.Exists(wordsFile))
+{
+    var before = Protocol.Filter.WordCount;
+    foreach (var line in File.ReadAllLines(wordsFile)) Protocol.Filter.AddWord(line);
+    RelayServer.Log($"filter: loaded {Protocol.Filter.WordCount - before} extra word(s) from {Path.GetFullPath(wordsFile)}");
 }
 
 var server = new RelayServer(port, traffic, collisions, password, banFile) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
@@ -96,8 +111,12 @@ while (running)
             case "unban" when parts.Length > 1: RelayServer.Log(server.Unban(parts[1])); break;
             case "bans": RelayServer.Log("bans:\n" + server.Bans.Describe()); break;
             case "say" when parts.Length > 1: RelayServer.Log(server.Say(string.Join(' ', parts.Skip(1)))); break;
+            case "filter" when parts.Length > 1:
+                Protocol.Filter.Enabled = parts[1] is "on" or "true" or "1";
+                RelayServer.Log($"filter {(Protocol.Filter.Enabled ? $"on ({Protocol.Filter.WordCount} words)" : "off")}");
+                break;
             case "quit" or "exit" or "stop": running = false; break;
-            default: RelayServer.Log("commands: list | traffic on|off | collisions on|off | bots N | kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans | say <msg> | quit"); break;
+            default: RelayServer.Log("commands: list | traffic on|off | collisions on|off | filter on|off | bots N | kick <id|name|ip> [reason] | ban <id|name|ip> [reason] | unban <ip> | bans | say <msg> | quit"); break;
         }
     }
 

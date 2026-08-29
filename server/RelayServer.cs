@@ -120,7 +120,7 @@ public sealed class RelayServer
     public bool Start()
     {
         var ok = _net.Start(Port);
-        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, max {MaxPlayers}, {Bans.Count} banned IP(s))"
+        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, filter {(Protocol.Filter.Enabled ? $"on ({Protocol.Filter.WordCount} words)" : "off")}, max {MaxPlayers}, {Bans.Count} banned IP(s))"
                : $"FAILED to bind UDP {Port}");
         return ok;
     }
@@ -334,7 +334,8 @@ public sealed class RelayServer
             {
                 if (!_byPeer.TryGetValue(peer, out var sender)) return;
                 reader.GetInt(); // claimed id ignored
-                var text = Protocol.SanitizeChat(reader.GetString(Protocol.MaxChatLength * 4));
+                var original = Protocol.SanitizeText(reader.GetString(Protocol.MaxChatLength * 4), Protocol.MaxChatLength, "");
+                var text = Protocol.Filter.Apply(original);
                 if (text.Length == 0) return;
 
                 // 3 messages per 2 seconds per player; excess is silently dropped.
@@ -342,7 +343,8 @@ public sealed class RelayServer
                 if (now - sender.ChatWindowStart >= 2f) { sender.ChatWindowStart = now; sender.ChatWindowCount = 0; }
                 if (++sender.ChatWindowCount > 3) { sender.Dropped++; return; }
 
-                Log($"[chat] {sender.Name} (#{sender.Id}): {text}");
+                // The journal keeps the unfiltered line so moderators see what was actually said.
+                Log($"[chat] {sender.Name} (#{sender.Id}): {original}{(ReferenceEquals(text, original) ? "" : "   [filtered]")}");
                 WriteChat(sender.Id, text);
                 _net.SendToAll(_w, DeliveryMethod.ReliableOrdered, peer);
                 break;

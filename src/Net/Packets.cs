@@ -28,11 +28,14 @@ public static class Wire
     /// <summary>Connection key: protocol version, plus the session password when one is set.</summary>
     public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Protocol : $"{Protocol}|{password}";
 
+    /// <summary>Optional word filter (off by default); applied to names and chat that reach this player.</summary>
+    public static readonly NightRunnersMP.Shared.ProfanityFilter Filter = new();
+
     /// <summary>Strips control characters and rich-text brackets, trims, caps length. Never empty.</summary>
-    public static string SanitizeName(string? raw) => SanitizeText(raw, MaxNameLength, "Player");
+    public static string SanitizeName(string? raw) => Filter.Apply(SanitizeText(raw, MaxNameLength, "Player"));
 
     /// <summary>Chat lines: same cleaning, longer cap; an empty result means "drop it".</summary>
-    public static string SanitizeChat(string? raw) => SanitizeText(raw, MaxChatLength, "");
+    public static string SanitizeChat(string? raw) => Filter.Apply(SanitizeText(raw, MaxChatLength, ""));
 
     /// <summary>Same cleaning for any server-supplied text (kick/ban messages).</summary>
     public static string SanitizeText(string? raw, int maxLength, string fallback)

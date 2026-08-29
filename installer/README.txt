@@ -19,7 +19,7 @@ PLAY
 
 KEYS
   F11 host      F12 connect (opens the address panel)      F8 disconnect
-  Enter  chat (type, Enter to send, Esc to cancel)
+  Enter  chat (type, Enter to send, Esc to cancel)   /filter on|off  or F3 = your profanity filter
   F5  car collisions on/off (the host decides for everyone)
   F6  traffic on/off (the host decides for everyone)
   F7  hide/show panel      F9 write status to the log

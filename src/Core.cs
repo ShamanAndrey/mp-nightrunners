@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.1", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.2", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -47,6 +47,7 @@ public class Core : MelonMod
     private KeyCode _chatKeyCode = KeyCode.Return;
     private bool _controlSuspended;
     private MelonPreferences_Entry<bool> _blockUnfocused = null!;
+    private MelonPreferences_Entry<bool> _chatFilter = null!;
 
     private bool TextBoxOpen => _connectPanel.Open || _chat.InputOpen;
     private CursorLockMode _prevCursorLock;
@@ -75,6 +76,8 @@ public class Core : MelonMod
         _chatKey = cat.CreateEntry("ChatKey", "Return", description: "Key that opens the chat line while in a session (Unity KeyCode name: Return, T, Y, ...)");
         if (!System.Enum.TryParse(_chatKey.Value, true, out _chatKeyCode)) _chatKeyCode = KeyCode.Return;
         _blockUnfocused = cat.CreateEntry("BlockInputWhenUnfocused", true, description: "Stop the game reacting to your keyboard while its window is not focused (the game normally keeps reading keys in the background)");
+        _chatFilter = cat.CreateEntry("ChatFilter", false, description: "Mask profanity in chat and player names you see (f***). Extra words: UserData\\NightRunnersMP-badwords.txt, one per line, trailing * = prefix");
+        SetupChatFilter();
 
         if (_checkUpdates.Value) _updates.Start(Info.Version);
 
@@ -93,6 +96,55 @@ public class Core : MelonMod
     {
         LoggerInstance.Msg(message);
         _hud.AddLog(message);
+    }
+
+    private void SetupChatFilter()
+    {
+        Wire.Filter.Enabled = _chatFilter.Value;
+        var path = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, "NightRunnersMP-badwords.txt");
+        try
+        {
+            if (System.IO.File.Exists(path))
+            {
+                var before = Wire.Filter.WordCount;
+                foreach (var line in System.IO.File.ReadAllLines(path)) Wire.Filter.AddWord(line);
+                Log($"[filter] loaded {Wire.Filter.WordCount - before} extra word(s) from {path}");
+            }
+        }
+        catch (System.Exception e) { Log($"[filter] could not read {path}: {e.Message}"); }
+        if (Wire.Filter.Enabled) Log($"[filter] chat filter on ({Wire.Filter.WordCount} words)");
+    }
+
+    /// <summary>Per-player choice: F3 or /filter in chat. The server's own filter is separate and enforced.</summary>
+    private void SetChatFilter(bool on)
+    {
+        _chatFilter.Value = on;
+        Wire.Filter.Enabled = on;
+        MelonPreferences.Save();
+        var msg = on ? "chat filter ON — profanity you see is masked (F3 or /filter off to disable)" : "chat filter off (F3 or /filter on to enable)";
+        Log($"[filter] {msg}");
+        _chat.AddSystem(msg);
+    }
+
+    /// <summary>Local slash commands typed into chat; returns true when handled (nothing is sent).</summary>
+    private bool HandleChatCommand(string text)
+    {
+        if (!text.StartsWith("/")) return false;
+        var parts = text.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+        switch (parts[0].ToLowerInvariant())
+        {
+            case "/filter":
+                if (parts.Length > 1 && parts[1] is "on" or "off") SetChatFilter(parts[1] == "on");
+                else _chat.AddSystem($"chat filter is {(Wire.Filter.Enabled ? "on" : "off")} — /filter on | /filter off");
+                break;
+            case "/help":
+                _chat.AddSystem("commands: /filter on|off   /help   — keys: F3 filter, F5 collisions, F6 traffic, F7 HUD, F8 disconnect");
+                break;
+            default:
+                _chat.AddSystem($"unknown command {parts[0]} — try /help");
+                break;
+        }
+        return true;
     }
 
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
@@ -143,6 +195,7 @@ public class Core : MelonMod
         else
         {
             if ((_host != null || _client != null) && Input.GetKeyDown(_chatKeyCode)) _chat.OpenInput();
+            if (Input.GetKeyDown(KeyCode.F3)) SetChatFilter(!_chatFilter.Value);
             if (Input.GetKeyDown(KeyCode.F4)) OpenDownloadPage();
             if (Input.GetKeyDown(KeyCode.F5)) ToggleCollisions();
             if (Input.GetKeyDown(KeyCode.F6)) ToggleTraffic();
@@ -351,8 +404,8 @@ public class Core : MelonMod
         _hudLines.Add($"Send:     {sendInfo}");
         var collisionsOn = _hostCollisions ?? _ghostCollisions.Value;
         _hudLines.Add($"Collisions: {(collisionsOn ? "<color=#88ff88>ON — cars are solid</color>" : "off — cars pass through")}   {(CollisionsAreHostControlled ? "<color=#999999>(host-controlled)</color>" : "(F5 toggles)")}");
-        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m    Input: {(GameInput.Suspended ? "<color=#ff9933>game keys paused</color>" : "live")}");
-        _hudLines.Add($"Keys:     F11 host   F12 connect   F8 disconnect   {_chatKey.Value} chat   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
+        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m    Filter {(Wire.Filter.Enabled ? "on" : "off")}    Input: {(GameInput.Suspended ? "<color=#ff9933>game keys paused</color>" : "live")}");
+        _hudLines.Add($"Keys:     F11 host   F12 connect   F8 disconnect   {_chatKey.Value} chat   F3 filter   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
 
         _hud.Draw(HudTitle(), _hudLines);
         _chat.Draw();
@@ -364,6 +417,7 @@ public class Core : MelonMod
         var text = _chat.Text.Trim();
         _chat.CloseInput();
         if (text.Length == 0) return;
+        if (HandleChatCommand(text)) return;
         text = Wire.SanitizeChat(text);
         if (_host == null && _client == null) { _chat.AddSystem("not in a session"); return; }
         _host?.SendChat(text);

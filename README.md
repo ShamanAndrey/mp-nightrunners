@@ -50,6 +50,7 @@ The HUD title shows whether you're on the latest release; when a newer one exist
 
 | Key | Action |
 |-----|--------|
+| F3  | Toggle your personal profanity filter (also `/filter on` / `/filter off` in chat; saved as `ChatFilter`). Masks chat and names *you* see (`f***`); extra words in `UserData\NightRunnersMP-badwords.txt`. Servers can enforce a filter for everyone with `--filter on` |
 | Enter | Open the chat line while in a session (`ChatKey` in the config to rebind); Enter sends, Esc cancels. Messages fade after 15 s; join/leave and server notices appear as grey lines |
 | F4  | Open the GitHub releases page (the HUD title says whether an update exists) |
 

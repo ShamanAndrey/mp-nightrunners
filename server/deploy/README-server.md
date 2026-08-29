@@ -43,6 +43,13 @@ To run it interactively instead (console commands `traffic on|off`, `collisions 
 /opt/nrmp/nrmp-server --port 7777 --traffic off
 ```
 
+## Word filter (optional)
+
+`--filter on` in the unit's `ExecStart` (or `echo "filter on" > /opt/nrmp/admin.cmd` at runtime) masks
+profanity and slurs in player names and chat for everyone (`f***`). The built-in list covers the strong
+stuff; add your own in `/opt/nrmp/badwords.txt`, one word per line, trailing `*` to also match as a
+prefix (`noob*`). The journal keeps the unfiltered text, tagged `[filtered]`, so moderators can act on it.
+
 ## Moderation (kick / ban)
 
 Commands work in the console **or** by writing them to `/opt/nrmp/admin.cmd` (read and deleted within
