@@ -1,0 +1,11 @@
+# Game-derived reverse-engineering output — never publish
+refs/
+
+# Build output
+bin/
+obj/
+.vs/
+*.user
+
+# Release packages (built from bin/)
+dist/
