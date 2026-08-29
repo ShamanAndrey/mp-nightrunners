@@ -9,7 +9,28 @@ namespace NightRunnersMP.Server;
 /// </summary>
 public static class Protocol
 {
-    public const string Key = "NRMP-0.5";
+    public const string Key = "NRMP-0.6";
+
+    /// <summary>Game builds a session can be for; alpha and Prologue have different maps and car lists.</summary>
+    public static readonly string[] KnownGames = { "alpha", "prologue" };
+
+    /// <summary>
+    /// Client keys look like "NRMP-0.6|prologue" or "NRMP-0.6|prologue|password".
+    /// Returns false on version mismatch, unknown/disallowed game, or wrong password.
+    /// </summary>
+    public static bool TryParseKey(string? key, string? serverPassword, IReadOnlyCollection<string> allowedGames, out string game, out string why)
+    {
+        game = ""; why = "";
+        if (string.IsNullOrEmpty(key)) { why = "empty key"; return false; }
+        var parts = key.Split('|');
+        if (parts[0] != Key) { why = $"protocol {parts[0]} (server has {Key})"; return false; }
+        if (parts.Length < 2) { why = "no game tag (old mod version)"; return false; }
+        game = parts[1];
+        if (!allowedGames.Contains(game)) { why = $"game '{game}' not served here"; return false; }
+        var pw = parts.Length > 2 ? string.Join('|', parts.Skip(2)) : "";
+        if (!string.IsNullOrEmpty(serverPassword) && pw != serverPassword) { why = "wrong password"; return false; }
+        return true;
+    }
 
     public const byte Hello = 1;        // client -> server: name (string), model (int)
     public const byte Welcome = 2;      // server -> client: yourId (int), count (int), PlayerInfo[count]
@@ -32,8 +53,8 @@ public static class Protocol
 
     public const byte FlagLowBeam = 1, FlagHighBeam = 2, FlagIndLeft = 4, FlagIndRight = 8, FlagEngine = 16;
 
-    /// <summary>Connection key: protocol version, plus the session password when one is set.</summary>
-    public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Key : $"{Key}|{password}";
+    /// <summary>Key a client would send for a given game (used by tools).</summary>
+    public static string KeyFor(string game, string? password) => string.IsNullOrEmpty(password) ? $"{Key}|{game}" : $"{Key}|{game}|{password}";
 
     /// <summary>Optional word filter (--filter on); applied to names and chat before they are relayed.</summary>
     public static readonly NightRunnersMP.Shared.ProfanityFilter Filter = new();

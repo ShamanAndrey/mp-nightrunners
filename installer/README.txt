@@ -1,12 +1,12 @@
 NIGHT RUNNERS MP
 ================
-Multiplayer mod for Night Runners (private alpha). Everyone must run the same game version
-and the same mod version.
+Multiplayer mod for Night Runners - works with the itch private alpha AND the Steam Prologue.
+Everyone in a session must run the same game build and the same mod version.
 
 INSTALL
   1. Extract this zip anywhere (or straight into the game folder).
   2. Double-click Install.bat
-     - it finds the game (or asks you to pick the folder),
+     - it finds the game(s) - itch alpha and/or Steam Prologue - (or asks you to pick the folder),
      - downloads MelonLoader (the mod loader) if you don't have it,
      - installs the mod and asks for your player name and the host's address.
   3. The FIRST launch takes a few minutes while MelonLoader prepares files. Wait for the main menu.

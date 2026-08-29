@@ -1,6 +1,6 @@
 // Health check for a Night Runners MP host or relay server:
 // performs the real handshake (connect key + Hello) and reports Welcome, rules and who is online.
-//   dotnet run --project tools/nrmp-ping -- <host> [port] [password] [--fuzz] [--say "text"] [--wait ms]
+//   dotnet run --project tools/nrmp-ping -- <host> [port] [password] [--game alpha|prologue] [--fuzz] [--say "text"] [--wait ms]
 // --fuzz: after the handshake, send a battery of malformed/hostile packets and verify the
 //         connection (and the server) survives. Exit code 0 = healthy.
 // --say:  send one chat line after the handshake.   --wait: stay connected N ms and print chat.
@@ -8,17 +8,19 @@ using System.Diagnostics;
 using LiteNetLib;
 using LiteNetLib.Utils;
 
-const string Protocol = "NRMP-0.5";
+const string Protocol = "NRMP-0.6";
 
 string? say = null;
 var waitMs = 0;
 var fuzz = false;
+var game = "alpha";
 var positional = new List<string>();
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
         case "--fuzz": fuzz = true; break;
+        case "--game": game = i + 1 < args.Length ? args[++i] : game; break;
         case "--say": say = i + 1 < args.Length ? args[++i] : null; break;
         case "--wait": waitMs = i + 1 < args.Length ? int.Parse(args[++i]) : 0; break;
         default: positional.Add(args[i]); break;
@@ -27,7 +29,7 @@ for (var i = 0; i < args.Length; i++)
 var host = positional.Count > 0 ? positional[0] : "127.0.0.1";
 var port = positional.Count > 1 ? int.Parse(positional[1]) : 7777;
 var password = positional.Count > 2 ? positional[2] : "";
-var key = password.Length > 0 ? $"{Protocol}|{password}" : Protocol;
+var key = password.Length > 0 ? $"{Protocol}|{game}|{password}" : $"{Protocol}|{game}";
 
 var listener = new EventBasedNetListener();
 var net = new NetManager(listener) { AutoRecycle = true };
@@ -105,7 +107,7 @@ listener.NetworkReceiveEvent += (peer, reader, _, _) =>
 
 net.Start();
 net.Connect(host, port, key);
-Console.WriteLine($"connecting to {host}:{port} (key {(password.Length > 0 ? Protocol + "|***" : key)}) ...");
+Console.WriteLine($"connecting to {host}:{port} (key {(password.Length > 0 ? $"{Protocol}|{game}|***" : key)}) ...");
 
 var fuzzStarted = false;
 var fuzzEndsAt = long.MaxValue;

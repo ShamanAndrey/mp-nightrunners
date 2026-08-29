@@ -67,6 +67,12 @@ journalctl -u nrmp-server -n 20 --no-pager
 Bans persist in `/opt/nrmp/bans.txt` (editable by hand; one IP per line). Kicked/banned players see the
 reason in their HUD; banned IPs are refused at connect.
 
+## Game builds
+
+By default the server serves both the itch alpha and the Steam Prologue, each in its own room (players of
+one build never see the other — different maps). Restrict with `--game prologue` or `--game alpha` in
+`ExecStart`. `list` shows each player's build.
+
 ## Notes
 - UDP 7777 must be open in **both** the OS firewall (ufw) and the provider's firewall panel (Hostinger: VPS → Firewall).
 - Protocol key `NRMP-0.4`: players on a different mod version are rejected at connect ("ConnectionRejected").

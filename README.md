@@ -1,6 +1,11 @@
 # Night Runners Multiplayer Mod
 
-A multiplayer sync mod for **Night Runners** (PLANET JEM, private alpha), built with MelonLoader.
+A multiplayer sync mod for **Night Runners** (PLANET JEM), built with MelonLoader.
+
+**Supported builds:** the itch **private alpha** (Unity 2019.4, Mount Haruna) and the Steam **Prologue**
+(Unity 2018.4, the C1 Tatsumi city). One mod DLL serves both; the installer finds either or both. The two
+builds have different maps and car lists, so a session is always one build or the other — the relay
+server keeps them in separate rooms and the in-game host only accepts its own build.
 
 ## For players
 
@@ -23,6 +28,15 @@ The HUD title shows whether you're on the latest release; when a newer one exist
 - `refs/dump/` — Il2CppDumper output from `GameAssembly.dll` (regenerate after every game update)
 
 ## Game tech notes
+
+Two builds, one API: every class the mod hooks (`CarParent`, `GodConstant`, `RCC_*`, `CarLocalCustom`,
+`car_overwrite`, Rewired) exists with identical signatures in both. Differences handled in
+`Sync/GameVariant.cs` and `Sync/TrafficControl.cs`: traffic is `TrafficCoordinator` (alpha) vs
+`GodConstant.trafficManager` / `sceneManager_traffic` (Prologue, via reflection); streamed sub-scenes are
+`MountHaruna_Chunk_N` vs `C1_AREA_*` / tunnels / collider & building layers; the car list is ~70 vs ~20 models.
+Dumps for both live in `refs/dump` (alpha) and `refs/dump-prologue`.
+
+### Alpha (itch)
 
 - Unity **2019.4.41f2**, IL2CPP (metadata v24.5, unencrypted). Addressables, Easy Save 3, Rewired.
 - Car physics: **RCC — Realistic Car Controller V3** (`RCC_CarControllerV3`, `RCC_SceneManager`).

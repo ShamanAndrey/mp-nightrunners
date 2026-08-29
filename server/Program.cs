@@ -12,6 +12,7 @@ var banFile = "bans.txt";
 var cmdFile = "admin.cmd";
 var filter = false;
 var wordsFile = "badwords.txt";
+var games = new List<string>(Protocol.KnownGames);
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -30,10 +31,16 @@ for (var i = 0; i < args.Length; i++)
         case "--cmdfile": cmdFile = Next(); break;
         case "--filter": filter = OnOff(Next()); break;
         case "--badwords": wordsFile = Next(); break;
+        case "--game":
+            games = Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => s.ToLowerInvariant()).ToList();
+            foreach (var g in games) if (!Protocol.KnownGames.Contains(g)) { Console.Error.WriteLine($"unknown game '{g}' (known: {string.Join(", ", Protocol.KnownGames)})"); return 2; }
+            break;
         case "-h" or "--help":
             Console.WriteLine("""
                 nrmp-server — dedicated relay for the Night Runners MP mod
                   --port N          UDP port (default 7777)
+                  --game LIST       builds served: alpha, prologue, or alpha,prologue (default both;
+                                    each build is its own room — players never see the other build)
                   --traffic on|off  AI traffic rule for everyone (default on)
                   --collisions on|off  car collisions rule (default off)
                   --bots N          fake players that orbit the first real player (testing)
@@ -65,7 +72,7 @@ if (File.Exists(wordsFile))
     RelayServer.Log($"filter: loaded {Protocol.Filter.WordCount - before} extra word(s) from {Path.GetFullPath(wordsFile)}");
 }
 
-var server = new RelayServer(port, traffic, collisions, password, banFile) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
+var server = new RelayServer(port, traffic, collisions, password, banFile, games) { MaxPlayers = Math.Clamp(max, 1, 32), FullRateHz = Math.Clamp(rate, 1f, 50f) };
 if (!server.Start()) return 1;
 for (var b = 0; b < bots; b++) server.AddBot();
 var commandFile = new CommandFile(cmdFile);

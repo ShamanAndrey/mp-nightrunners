@@ -12,7 +12,10 @@ namespace NightRunnersMP.Sync;
 /// </summary>
 public sealed class GhostManager
 {
-    private const int FallbackModel = 33; // car_carOrigin.ModelType.tobimizu_wasp_1996
+    private const int PreferredFallbackModel = 33; // car_carOrigin.ModelType.tobimizu_wasp_1996 (alpha)
+
+    /// <summary>The car list differs per build (alpha ~70 models, Prologue ~20): pick something that exists here.</summary>
+    private static int FallbackModel => IsKnownModel(PreferredFallbackModel) ? PreferredFallbackModel : 1;
     private const float SpawnTimeout = 30f;
 
     private readonly Dictionary<int, RemoteCar> _cars = new();

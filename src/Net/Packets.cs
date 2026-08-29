@@ -18,15 +18,19 @@ public enum PacketType : byte
 /// <summary>Limits and sanitisers applied to everything that arrives from the network.</summary>
 public static class Wire
 {
-    public const string Protocol = "NRMP-0.5";
+    public const string Protocol = "NRMP-0.6";
     public const int MaxNameLength = 24;
     public const int MaxChatLength = 200;
     public const int SystemSenderId = -1;
     public const int MaxPlayers = 32;
     public const float MaxCoordinate = 100_000f; // metres; the map is a few km across
 
-    /// <summary>Connection key: protocol version, plus the session password when one is set.</summary>
-    public static string KeyFor(string? password) => string.IsNullOrEmpty(password) ? Protocol : $"{Protocol}|{password}";
+    /// <summary>
+    /// Connection key: protocol version, game build (alpha/prologue — different maps and car lists
+    /// must never share a session), and the session password when one is set.
+    /// </summary>
+    public static string KeyFor(string? password) =>
+        string.IsNullOrEmpty(password) ? $"{Protocol}|{Sync.Game.Tag}" : $"{Protocol}|{Sync.Game.Tag}|{password}";
 
     /// <summary>Optional word filter (off by default); applied to names and chat that reach this player.</summary>
     public static readonly NightRunnersMP.Shared.ProfanityFilter Filter = new();

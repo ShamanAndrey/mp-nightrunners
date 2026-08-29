@@ -18,6 +18,7 @@ public sealed class RelayServer
     {
         public int Id;
         public string Name = "";
+        public string Game = "";       // "" for bots: visible in every room
         public int Model;
         public NetPeer? Peer;          // null for bots
         public Bot? Bot;
@@ -45,7 +46,9 @@ public sealed class RelayServer
     private readonly Dictionary<int, Player> _byId = new();
     private readonly Dictionary<NetPeer, Player> _byPeer = new();
     private readonly Dictionary<string, float> _lastConnectByAddress = new();
-    private readonly string _key;
+    private readonly Dictionary<NetPeer, string> _gameByPeer = new(); // known from the connect key, before Hello
+    private readonly string? _password;
+    private readonly IReadOnlyCollection<string> _games;
     private readonly NetDataWriter _reason = new();
     private int _nextId = 1;
     private float _nextBotTick;
@@ -62,13 +65,14 @@ public sealed class RelayServer
     public int PlayerCount => _byPeer.Count;
     public int BotCount => _byId.Values.Count(p => p.Bot != null);
 
-    public RelayServer(int port, bool traffic, bool collisions, string? password = null, string banFile = "bans.txt")
+    public RelayServer(int port, bool traffic, bool collisions, string? password = null, string banFile = "bans.txt", IReadOnlyCollection<string>? games = null)
     {
         Port = port;
         Traffic = traffic;
         Collisions = collisions;
         HasPassword = !string.IsNullOrEmpty(password);
-        _key = Protocol.KeyFor(password);
+        _password = password;
+        _games = games ?? Protocol.KnownGames;
         Bans = new BanList(banFile);
         _net = new NetManager(_listener)
         {
@@ -87,16 +91,27 @@ public sealed class RelayServer
             if (_lastConnectByAddress.TryGetValue(addr, out var last) && now - last < ConnectCooldownPerAddress) { req.Reject(); return; }
             _lastConnectByAddress[addr] = now;
             if (_lastConnectByAddress.Count > 10_000) _lastConnectByAddress.Clear();
-            if (req.AcceptIfKey(_key) == null) Log($"rejected {addr}: wrong version or password");
+
+            string? key = null;
+            try { key = req.Data.GetString(256); } catch { }
+            if (!Protocol.TryParseKey(key, _password, _games, out var game, out var why))
+            {
+                Log($"rejected {addr}: {why}");
+                RejectWith(req, why.StartsWith("wrong password") ? "Wrong password." : $"Cannot join: {why}.");
+                return;
+            }
+            var peer = req.Accept();
+            if (peer != null) _gameByPeer[peer] = game;
         };
-        _listener.PeerConnectedEvent += peer => Log($"peer {peer.Id} connected from {peer.Address}, waiting for Hello");
+        _listener.PeerConnectedEvent += peer => Log($"peer {peer.Id} connected from {peer.Address} ({(_gameByPeer.TryGetValue(peer, out var g) ? g : "?")}), waiting for Hello");
         _listener.PeerDisconnectedEvent += (peer, info) =>
         {
+            _gameByPeer.Remove(peer);
             if (!_byPeer.Remove(peer, out var p)) { Log($"peer {peer.Id} left before Hello ({info.Reason})"); return; }
             _byId.Remove(p.Id);
-            Log($"{p.Name} (#{p.Id}) left: {info.Reason}. {PlayerCount} player(s) online");
+            Log($"{p.Name} (#{p.Id}, {p.Game}) left: {info.Reason}. {PlayerCount} player(s) online");
             _w.Reset(); _w.Put(Protocol.PlayerLeft); _w.Put(p.Id);
-            _net.SendToAll(_w, DeliveryMethod.ReliableOrdered);
+            SendToRoom(p.Game, DeliveryMethod.ReliableOrdered, null);
         };
         _listener.NetworkReceiveEvent += (peer, reader, _, _) =>
         {
@@ -120,9 +135,20 @@ public sealed class RelayServer
     public bool Start()
     {
         var ok = _net.Start(Port);
-        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, filter {(Protocol.Filter.Enabled ? $"on ({Protocol.Filter.WordCount} words)" : "off")}, max {MaxPlayers}, {Bans.Count} banned IP(s))"
+        Log(ok ? $"listening on UDP {Port} (protocol {Protocol.Key}, games {string.Join('/', _games)}, {(HasPassword ? "password protected" : "no password")}, traffic {(Traffic ? "on" : "off")}, collisions {(Collisions ? "on" : "off")}, filter {(Protocol.Filter.Enabled ? $"on ({Protocol.Filter.WordCount} words)" : "off")}, max {MaxPlayers}, {Bans.Count} banned IP(s))"
                : $"FAILED to bind UDP {Port}");
         return ok;
+    }
+
+    /// <summary>Players of different game builds never see each other: each build is its own room.</summary>
+    private void SendToRoom(string game, DeliveryMethod method, NetPeer? except)
+    {
+        foreach (var kv in _byPeer)
+        {
+            if (kv.Key == except) continue;
+            if (game.Length > 0 && kv.Value.Game != game) continue;
+            kv.Key.Send(_w, method);
+        }
     }
 
     // ---- moderation --------------------------------------------------------------------------
@@ -282,14 +308,15 @@ public sealed class RelayServer
                     Name = Protocol.SanitizeName(reader.GetString(Protocol.MaxNameLength * 4)),
                     Model = reader.GetInt(),
                     Peer = peer,
+                    Game = _gameByPeer.TryGetValue(peer, out var g) ? g : "",
                 };
                 if (p.Model < 0 || p.Model > 1000) p.Model = 0;
                 _byPeer[peer] = p;
                 _byId[p.Id] = p;
-                Log($"{p.Name} (#{p.Id}, model {p.Model}) joined from {peer.Address}. {PlayerCount} player(s) online");
+                Log($"{p.Name} (#{p.Id}, {p.Game}, model {p.Model}) joined from {peer.Address}. {PlayerCount} player(s) online");
 
-                // Welcome: newcomer's id, then everyone already here (players and bots).
-                var others = _byId.Values.Where(o => o.Id != p.Id).ToList();
+                // Welcome: newcomer's id, then everyone already in this room (same build) plus bots.
+                var others = _byId.Values.Where(o => o.Id != p.Id && (o.Game.Length == 0 || o.Game == p.Game)).ToList();
                 _w.Reset(); _w.Put(Protocol.Welcome); _w.Put(p.Id); _w.Put(others.Count);
                 foreach (var o in others) WritePlayerInfo(o);
                 peer.Send(_w, DeliveryMethod.ReliableOrdered);
@@ -298,7 +325,7 @@ public sealed class RelayServer
                 peer.Send(_w, DeliveryMethod.ReliableOrdered);
 
                 _w.Reset(); _w.Put(Protocol.PlayerJoined); WritePlayerInfo(p);
-                _net.SendToAll(_w, DeliveryMethod.ReliableOrdered, peer);
+                SendToRoom(p.Game, DeliveryMethod.ReliableOrdered, peer);
                 break;
             }
             case Protocol.State:
@@ -323,6 +350,7 @@ public sealed class RelayServer
                 {
                     if (kv.Key == peer) continue;
                     var c = kv.Value;
+                    if (c.Game != sender.Game) continue;
                     var dist = c.HasPos ? Vec3.Distance(sender.Pos, c.Pos) : 0f;
                     if (!c.GateFor(sender.Id).ShouldSend(now, dist, FullRateHz)) continue;
                     if (!written) { _w.Reset(); _w.Put(Protocol.State); _w.Put(sender.Id); _w.Put(raw); written = true; }
@@ -344,9 +372,9 @@ public sealed class RelayServer
                 if (++sender.ChatWindowCount > 3) { sender.Dropped++; return; }
 
                 // The journal keeps the unfiltered line so moderators see what was actually said.
-                Log($"[chat] {sender.Name} (#{sender.Id}): {original}{(ReferenceEquals(text, original) ? "" : "   [filtered]")}");
+                Log($"[chat] {sender.Name} (#{sender.Id}, {sender.Game}): {original}{(ReferenceEquals(text, original) ? "" : "   [filtered]")}");
                 WriteChat(sender.Id, text);
-                _net.SendToAll(_w, DeliveryMethod.ReliableOrdered, peer);
+                SendToRoom(sender.Game, DeliveryMethod.ReliableOrdered, peer);
                 break;
             }
             // Clients may not send Welcome/PlayerJoined/PlayerLeft/Settings; anything else is ignored.
@@ -361,7 +389,7 @@ public sealed class RelayServer
     {
         if (_byId.Count == 0) return "nobody online";
         var lines = _byId.Values.OrderBy(p => p.Id).Select(p =>
-            $"  #{p.Id,-3} {p.Name,-24} model {p.Model,-3} " +
+            $"  #{p.Id,-3} {p.Name,-24} {(p.Game.Length > 0 ? p.Game : "bot"),-9} model {p.Model,-3} " +
             (p.Bot != null ? "bot" : $"{p.Peer!.Address}  ping {p.Peer.Ping} ms  {p.Packets} pkts, {p.Dropped} dropped") +
             (p.HasPos ? $"  @ ({p.Pos.X:F0}, {p.Pos.Y:F0}, {p.Pos.Z:F0})" : "  (no position yet)"));
         return string.Join('\n', lines);

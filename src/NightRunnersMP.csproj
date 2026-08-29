@@ -5,9 +5,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>NightRunnersMP</AssemblyName>
-    <Version>0.2.2</Version>
+    <Version>0.3.0</Version>
     <RootNamespace>NightRunnersMP</RootNamespace>
     <GameDir>D:\itch\night-runners-private-alpha</GameDir>
+    <!-- Second install (Steam Prologue); deployed to as well when present. Same interop API, so one build serves both. -->
+    <PrologueDir>D:\SteamLibrary\steamapps\common\NIGHT-RUNNERS PROLOGUE</PrologueDir>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
@@ -29,6 +31,8 @@
   <Target Name="CopyToGame" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\Mods" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
     <Copy SourceFiles="$(OutDir)LiteNetLib.dll" DestinationFolder="$(GameDir)\UserLibs" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
+    <Copy Condition="Exists('$(PrologueDir)\MelonLoader')" SourceFiles="$(TargetPath)" DestinationFolder="$(PrologueDir)\Mods" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
+    <Copy Condition="Exists('$(PrologueDir)\MelonLoader')" SourceFiles="$(OutDir)LiteNetLib.dll" DestinationFolder="$(PrologueDir)\UserLibs" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
     <Message Text="Deploy attempted to $(GameDir) (a warning above means the game is running; close it and rebuild, or copy bin\Release\$(AssemblyName).dll by hand)" Importance="high" />
   </Target>
 

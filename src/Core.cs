@@ -1,14 +1,14 @@
 using System.Collections.Generic;
 using Il2Cpp;
-using Il2CppPlanetJem.Roads.Traffic;
 using MelonLoader;
 using NightRunnersMP.Net;
 using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.2.2", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.3.0", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
+[assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PROLOGUE")]
 
 namespace NightRunnersMP;
 
@@ -59,6 +59,7 @@ public class Core : MelonMod
 
     public override void OnInitializeMelon()
     {
+        Game.Detect();
         var cat = MelonPreferences.CreateCategory("NightRunnersMP");
         _playerName = cat.CreateEntry("PlayerName", "Runner");
         _hostPort = cat.CreateEntry("HostPort", 7777);
@@ -88,7 +89,8 @@ public class Core : MelonMod
             Collisions = _ghostCollisions.Value,
         };
 
-        Log("Night Runners MP loaded. F5 collisions | F6 traffic | F7 HUD | F9 status | F11 host | F12 connect | F8 disconnect");
+        Log($"Night Runners MP loaded in '{Game.ProductName}' ({Game.DisplayName}). F5 collisions | F6 traffic | F7 HUD | F9 status | F11 host | F12 connect | F8 disconnect");
+        if (Game.Variant == GameVariant.Unknown) Log("[warn] unrecognised game build — traffic control disabled, everything else best-effort");
         Log($"Config [NightRunnersMP]: name={_playerName.Value} host={_hostPort.Value} connect={_connectAddress.Value}:{_connectPort.Value} ghostOffset={_ghostOffset.Value}");
     }
 
@@ -150,7 +152,7 @@ public class Core : MelonMod
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
     {
         Log($"Scene loaded: {sceneName}");
-        if (!sceneName.Contains("Chunk")) _ghosts.OnWorldSceneChanged();
+        if (!Game.IsStreamingSubScene(sceneName)) _ghosts.OnWorldSceneChanged();
     }
 
     public override void OnApplicationQuit()
@@ -217,10 +219,9 @@ public class Core : MelonMod
         if (!EffectiveTraffic && Time.realtimeSinceStartup >= _nextTrafficCheck)
         {
             _nextTrafficCheck = Time.realtimeSinceStartup + 1f;
-            var traffic = TrafficCoordinator.Instance;
-            if (traffic != null && traffic.IsTrafficEnabled)
+            if (TrafficControl.Available && TrafficControl.IsEnabled)
             {
-                traffic.SetTrafficEnabled(false, true);
+                TrafficControl.Set(false, true);
                 Log($"[traffic] switched off ({(TrafficIsHostControlled ? "host rule" : "config")})");
             }
         }
@@ -249,13 +250,12 @@ public class Core : MelonMod
     private void ApplyTraffic(bool enable, string reason)
     {
         _nextTrafficCheck = 0f;
-        var traffic = TrafficCoordinator.Instance;
-        if (traffic == null)
+        if (!TrafficControl.Available)
         {
             Log($"[traffic] {(enable ? "on" : "off")} ({reason}); applies once a map is loaded");
             return;
         }
-        traffic.SetTrafficEnabled(enable, !enable);
+        TrafficControl.Set(enable, !enable);
         Log($"[traffic] {(enable ? "enabled" : "disabled and cleared")} ({reason})");
     }
 
@@ -312,11 +312,10 @@ public class Core : MelonMod
 
     private static string TrafficStatus()
     {
-        var traffic = TrafficCoordinator.Instance;
-        if (traffic == null) return "no map loaded";
-        var active = traffic.ActiveVehicles?.TryCast<Il2CppSystem.Collections.Generic.IReadOnlyCollection<TrafficVehicle>>();
-        var n = active != null ? active.Count : 0;
-        return traffic.IsTrafficEnabled ? $"<color=#88ff88>on</color>, {n} active" : $"<color=#ff9933>off</color>, {n} active";
+        if (Game.Variant == GameVariant.Unknown) return "unsupported build";
+        if (!TrafficControl.Available) return "no map loaded";
+        var n = TrafficControl.ActiveCount;
+        return TrafficControl.IsEnabled ? $"<color=#88ff88>on</color>, {n} active" : $"<color=#ff9933>off</color>, {n} active";
     }
 
     // Sample on the physics clock so snapshots are evenly spaced and pose/timestamp agree.
@@ -453,7 +452,7 @@ public class Core : MelonMod
             UpdateChecker.State.Unavailable => "<color=#999999>update check unavailable</color>",
             _ => "",
         };
-        return $"NIGHT RUNNERS MP  v{Info.Version}   {status}   <color=#999999>[F7 hide]</color>";
+        return $"NIGHT RUNNERS MP  v{Info.Version}  <color=#999999>({Game.DisplayName})</color>   {status}   <color=#999999>[F7 hide]</color>";
     }
 
     private void OpenDownloadPage()
