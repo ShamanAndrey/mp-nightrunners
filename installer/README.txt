@@ -14,11 +14,11 @@ INSTALL
 PLAY
   - Drive into free-roam on the same map as the host.
   - HOST:   press F11. Give your friends your address (playit.gg / Tailscale / LAN IP).
-  - FRIEND: put the host's address in UserData\MelonPreferences.cfg (ConnectAddress), press F12.
+  - FRIEND: press F12, type the host's address (and your name), press Enter. It is remembered.
   - A panel in the top-left shows what is going on. F7 hides it.
 
 KEYS
-  F11 host      F12 connect      F8 disconnect
+  F11 host      F12 connect (opens the address panel)      F8 disconnect
   F5  car collisions on/off (the host decides for everyone)
   F6  traffic on/off (the host decides for everyone)
   F7  hide/show panel      F9 write status to the log

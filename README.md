@@ -6,7 +6,7 @@ A multiplayer sync mod for **Night Runners** (PLANET JEM, private alpha), built 
 
 1. Download the latest `NightRunnersMP-v*.zip` from the [Releases page](https://github.com/ShamanAndrey/mp-nightrunners/releases/latest) and extract it.
 2. Double-click **`Install.bat`** — it finds the game, installs MelonLoader if needed, installs the mod, and asks for your name and the host's address.
-3. First launch takes a few minutes (MelonLoader prepares files). Then: drive into free-roam, **F11** to host or **F12** to connect.
+3. First launch takes a few minutes (MelonLoader prepares files). Then: drive into free-roam, **F11** to host, or **F12** to type the host's address and connect.
 
 Hosting without port-forwarding: use [playit.gg](https://playit.gg) (UDP tunnel — ngrok does **not** carry UDP), Tailscale, or a LAN. `Uninstall.bat` removes everything again.
 
@@ -54,7 +54,7 @@ The HUD title shows whether you're on the latest release; when a newer one exist
 | F7  | Toggle the in-game HUD (on by default: car, host/client, ghosts, recent log) |
 | F9  | Write a status snapshot to the log |
 | F11 | Host a session on `HostPort` |
-| F12 | Connect to `ConnectAddress:ConnectPort` (if already hosting and address is localhost → loopback self-test) |
+| F12 | Open the connect panel: type your name and the host address (`host` or `host:port`), Enter to connect, Esc to cancel. Car controls are suspended while it's open. Saved to the config for next time. (Hosting + `127.0.0.1` → loopback self-test) |
 | F8  | Disconnect and remove ghosts |
 
 Config lives in `<game>\UserData\MelonPreferences.cfg` under `[NightRunnersMP]`:
@@ -78,6 +78,16 @@ Snapshots are sampled in the sender's `FixedUpdate` and stamped with `Time.fixed
 **Solo loopback test:** drive in free-roam → F11 → F12. Your own car's state travels host→client→host through real UDP and a ghost copy of your car appears 4 m to your right, mirroring you with ~100 ms latency.
 
 **Two players:** both install MelonLoader + `NightRunnersMP.dll` (Mods) + `LiteNetLib.dll` (UserLibs). Host forwards UDP `HostPort` on their router (or both use Radmin VPN / ZeroTier / Tailscale and use the VPN IP). Host: drive in free-roam, F11. Friend: set `ConnectAddress` to the host's IP, drive in free-roam, F12. Both must be on the same map.
+
+## Dedicated server (`server/`)
+
+`nrmp-server` is a standalone relay that plays the host role without a car: players connect *out* to
+it (F12 → its address), so nobody port-forwards or uses a VPN. It assigns ids, relays snapshots paced
+by distance, owns the traffic/collision rules (`--traffic on|off --collisions on|off`, or console
+commands at runtime), and can spawn `--bots N` fake players that orbit you for solo testing.
+`.\tools\publish-server.ps1` produces single-file binaries in `dist\server\` (Linux + Windows);
+`server\deploy\README-server.md` has the VPS install steps (systemd unit included).
+It shares no code with the mod — `server/Protocol.cs` mirrors `src/Net/Packets.cs`; change both together.
 
 ## Shipping a release
 

@@ -37,4 +37,6 @@ Compress-Archive -Path "$pkg\*" -DestinationPath $zip
 
 Write-Host "Packaged $zip ($([math]::Round((Get-Item $zip).Length / 1KB)) KB)" -ForegroundColor Green
 Get-ChildItem $pkg -Recurse -File | ForEach-Object { '  ' + $_.FullName.Substring($pkg.Length + 1) }
-Write-Host "Publish: gh release create v$version `"$zip`" --title `"Night Runners MP v$version`" --generate-notes" -ForegroundColor DarkGray
+$srv = Join-Path $root 'dist\server'
+Write-Host "Publish (mod + server binaries; run tools\publish-server.ps1 first):" -ForegroundColor DarkGray
+Write-Host "  gh release create v$version `"$zip`" `"$srv\linux-x64\nrmp-server#nrmp-server (Linux x64)`" `"$srv\win-x64\nrmp-server.exe#nrmp-server.exe (Windows x64)`" `"$srv\nrmp-server.service`" --title `"Night Runners MP v$version`" --generate-notes" -ForegroundColor DarkGray

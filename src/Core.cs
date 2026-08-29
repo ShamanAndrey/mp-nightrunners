@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.3", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.4", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -39,6 +39,8 @@ public class Core : MelonMod
     private readonly List<string> _hudLines = new();
     private readonly UpdateChecker _updates = new();
     private MelonPreferences_Entry<bool> _checkUpdates = null!;
+    private readonly ConnectPanel _connectPanel = new();
+    private bool _controlSuspended;
 
     private HostSession? _host;
     private ClientSession? _client;
@@ -88,14 +90,31 @@ public class Core : MelonMod
 
     public override void OnUpdate()
     {
-        if (Input.GetKeyDown(KeyCode.F4)) OpenDownloadPage();
-        if (Input.GetKeyDown(KeyCode.F5)) ToggleCollisions();
-        if (Input.GetKeyDown(KeyCode.F6)) ToggleTraffic();
-        if (Input.GetKeyDown(KeyCode.F7)) _hud.Visible = !_hud.Visible;
-        if (Input.GetKeyDown(KeyCode.F9)) Probe();
-        if (Input.GetKeyDown(KeyCode.F11)) StartHost();
-        if (Input.GetKeyDown(KeyCode.F12)) Connect();
-        if (Input.GetKeyDown(KeyCode.F8)) Disconnect();
+        if (_connectPanel.Open)
+        {
+            // Typing mode: the car must not react to the keys, and our hotkeys stay quiet.
+            SuspendCarControl(true);
+            if (_connectPanel.ConnectRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            {
+                _connectPanel.ConnectRequested = false;
+                ConnectFromPanel();
+            }
+            else if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.F12))
+            {
+                CloseConnectPanel();
+            }
+        }
+        else
+        {
+            if (Input.GetKeyDown(KeyCode.F4)) OpenDownloadPage();
+            if (Input.GetKeyDown(KeyCode.F5)) ToggleCollisions();
+            if (Input.GetKeyDown(KeyCode.F6)) ToggleTraffic();
+            if (Input.GetKeyDown(KeyCode.F7)) _hud.Visible = !_hud.Visible;
+            if (Input.GetKeyDown(KeyCode.F9)) Probe();
+            if (Input.GetKeyDown(KeyCode.F11)) StartHost();
+            if (Input.GetKeyDown(KeyCode.F12)) OpenConnectPanel();
+            if (Input.GetKeyDown(KeyCode.F8)) Disconnect();
+        }
 
         _host?.Poll();
         _client?.Poll();
@@ -262,7 +281,7 @@ public class Core : MelonMod
 
         _hudLines.Add(_client != null
             ? $"Client:   <color=#88ff88>{_client.Status}</color>"
-            : $"Client:   off  —  F12 to connect to {_connectAddress.Value}:{_connectPort.Value}");
+            : $"Client:   off  —  F12 to enter a host address (last: {_connectAddress.Value}:{_connectPort.Value})");
 
         _hudLines.Add($"Traffic:  {TrafficStatus()}   {(TrafficIsHostControlled ? "<color=#999999>(host-controlled)</color>" : $"(F6 toggles; config: {(_trafficEnabled.Value ? "on" : "off")})")}");
         _hudLines.Add($"Ghosts:   {_ghosts.Count}" + (_ghosts.Count == 0 ? "  (remote players appear here)" : ""));
@@ -289,6 +308,7 @@ public class Core : MelonMod
         _hudLines.Add("Keys:     F11 host   F12 connect   F8 disconnect   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
 
         _hud.Draw(HudTitle(), _hudLines);
+        _connectPanel.Draw();
     }
 
     private string HudTitle()
@@ -349,6 +369,58 @@ public class Core : MelonMod
         host.PlayerLeft += _ghosts.OnPlayerLeft;
         host.StateReceived += (id, s) => _ghosts.OnState(id, s);
         _host = host;
+    }
+
+    private void OpenConnectPanel()
+    {
+        if (_client != null) { Log($"Already {_client.Status} — F8 to disconnect first"); return; }
+        var lastAddr = _connectPort.Value == 7777 ? _connectAddress.Value : $"{_connectAddress.Value}:{_connectPort.Value}";
+        _connectPanel.Show(_playerName.Value, lastAddr);
+    }
+
+    private void CloseConnectPanel()
+    {
+        _connectPanel.Close();
+        SuspendCarControl(false);
+    }
+
+    /// <summary>Parse "host" or "host:port", persist name/address, then connect.</summary>
+    private void ConnectFromPanel()
+    {
+        var name = _connectPanel.Name.Trim();
+        var text = _connectPanel.Address.Trim();
+        if (text.Length == 0) { Log("[client] enter the host's address first"); return; }
+
+        var host = text;
+        var port = _connectPort.Value;
+        var colon = text.LastIndexOf(':');
+        if (colon > 0 && int.TryParse(text.Substring(colon + 1), out var p) && p is > 0 and < 65536)
+        {
+            host = text.Substring(0, colon);
+            port = p;
+        }
+
+        if (name.Length > 0) _playerName.Value = name;
+        _connectAddress.Value = host;
+        _connectPort.Value = port;
+        MelonPreferences.Save();
+
+        CloseConnectPanel();
+        Connect();
+    }
+
+    private void SuspendCarControl(bool suspend)
+    {
+        var rcc = LocalCar.Rcc;
+        if (suspend)
+        {
+            if (rcc != null && rcc.canControl) { rcc.canControl = false; _controlSuspended = true; }
+        }
+        else if (_controlSuspended)
+        {
+            if (rcc != null) rcc.canControl = true;
+            _controlSuspended = false;
+        }
     }
 
     private void Connect()

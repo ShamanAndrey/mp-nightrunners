@@ -22,13 +22,14 @@ function Test-GameDir($dir) { return ($dir -and (Test-Path (Join-Path $dir $ExeN
 function Find-GameDir {
     if (Test-GameDir $GameDir) { return (Resolve-Path $GameDir).Path }
     if (Test-GameDir $Here) { return $Here }
+    $bases = @((Join-Path $env:APPDATA 'itch\apps'), (Join-Path $env:LOCALAPPDATA 'itch\apps'))
     foreach ($d in Get-PSDrive -PSProvider FileSystem) {
-        foreach ($sub in 'itch', 'itch\apps', 'Games\itch', 'Games') {
-            $base = Join-Path $d.Root $sub
-            if (Test-Path $base) {
-                foreach ($c in Get-ChildItem $base -Directory -ErrorAction SilentlyContinue) {
-                    if (Test-GameDir $c.FullName) { return $c.FullName }
-                }
+        foreach ($sub in 'itch', 'itch\apps', 'Games\itch', 'Games') { $bases += Join-Path $d.Root $sub }
+    }
+    foreach ($base in $bases) {
+        if (Test-Path $base) {
+            foreach ($c in Get-ChildItem $base -Directory -ErrorAction SilentlyContinue) {
+                if (Test-GameDir $c.FullName) { return $c.FullName }
             }
         }
     }

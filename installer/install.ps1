@@ -42,8 +42,12 @@ function Find-GameDir {
             }
         }
     }
-    $candidates.Add((Join-Path $env:LOCALAPPDATA 'itch\apps\night-runners-private-alpha'))
-    $candidates.Add((Join-Path $env:LOCALAPPDATA 'itch\apps\night-runners'))
+    # itch's default library is %APPDATA%\itch\apps (Roaming); older installs used LocalAppData.
+    foreach ($base in @((Join-Path $env:APPDATA 'itch\apps'), (Join-Path $env:LOCALAPPDATA 'itch\apps'))) {
+        if (Test-Path $base) {
+            Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | ForEach-Object { $candidates.Add($_.FullName) }
+        }
+    }
     foreach ($c in $candidates) { if (Test-GameDir $c) { return $c } }
 
     if ($Silent) { throw "Game folder not found. Run: install.ps1 -GameDir 'C:\path\to\the\game'" }
@@ -113,7 +117,7 @@ if ($hasSection) {
     if (-not $Silent) {
         $n = Read-Host '    Your player name, shown above your car [Runner]'
         if ($n) { $name = $n.Trim() }
-        $a = Read-Host "    Host address to connect to (leave empty if you don't know it yet)"
+        $a = Read-Host "    Host address to connect to (optional - you can also type it in-game with F12)"
         if ($a) { $addr = $a.Trim() }
     }
     $template = Get-Content (Join-Path $Here 'MelonPreferences.template.cfg') -Raw
@@ -128,7 +132,7 @@ if ($hasSection) {
 Write-Host ''
 Write-Host '  Installed!' -ForegroundColor Green
 Write-Host ''
-Write-Host '  In game:  F12 connect to the host   F11 host yourself   F8 disconnect' -ForegroundColor White
+Write-Host '  In game:  F12 type the host address + Enter   F11 host yourself   F8 disconnect' -ForegroundColor White
 Write-Host '            F6 traffic on/off (host decides)   F7 hide/show the panel   F9 status' -ForegroundColor White
 Write-Host "  Config:   $cfg" -ForegroundColor DarkGray
 Write-Host '  The FIRST launch takes a few minutes while MelonLoader prepares files - wait for the main menu.' -ForegroundColor Yellow

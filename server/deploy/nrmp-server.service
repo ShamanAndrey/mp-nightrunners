@@ -1,0 +1,17 @@
+[Unit]
+Description=Night Runners MP relay server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nrmp
+WorkingDirectory=/opt/nrmp
+ExecStart=/opt/nrmp/nrmp-server --port 7777 --traffic off --collisions off
+Restart=always
+RestartSec=3
+# Single-file .NET apps extract native pieces here; keep it writable and persistent.
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/nrmp/.extract
+
+[Install]
+WantedBy=multi-user.target
