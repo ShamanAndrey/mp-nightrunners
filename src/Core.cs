@@ -7,7 +7,7 @@ using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.4", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.1.5", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 
 namespace NightRunnersMP;
@@ -41,6 +41,8 @@ public class Core : MelonMod
     private MelonPreferences_Entry<bool> _checkUpdates = null!;
     private readonly ConnectPanel _connectPanel = new();
     private bool _controlSuspended;
+    private CursorLockMode _prevCursorLock;
+    private bool _prevCursorVisible;
 
     private HostSession? _host;
     private ClientSession? _client;
@@ -92,15 +94,18 @@ public class Core : MelonMod
     {
         if (_connectPanel.Open)
         {
-            // Typing mode: the car must not react to the keys, and our hotkeys stay quiet.
+            // Typing mode: the car must not react to the keys, our hotkeys stay quiet,
+            // and the game's hidden/locked cursor is forced back so the buttons are usable.
             SuspendCarControl(true);
+            ShowCursor();
             if (_connectPanel.ConnectRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
                 _connectPanel.ConnectRequested = false;
                 ConnectFromPanel();
             }
-            else if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.F12))
+            else if (_connectPanel.CancelRequested || Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.F12))
             {
+                _connectPanel.CancelRequested = false;
                 CloseConnectPanel();
             }
         }
@@ -262,7 +267,17 @@ public class Core : MelonMod
     }
 
     // Move ghosts after the game's own Update so nothing overrides the pose this frame.
-    public override void OnLateUpdate() => _ghosts.Update();
+    public override void OnLateUpdate()
+    {
+        if (_connectPanel.Open) ShowCursor(); // after the game's Update, in case it re-locked the cursor
+        _ghosts.Update();
+    }
+
+    private static void ShowCursor()
+    {
+        if (Cursor.lockState != CursorLockMode.None) Cursor.lockState = CursorLockMode.None;
+        if (!Cursor.visible) Cursor.visible = true;
+    }
 
     public override void OnGUI()
     {
@@ -375,6 +390,8 @@ public class Core : MelonMod
     {
         if (_client != null) { Log($"Already {_client.Status} — F8 to disconnect first"); return; }
         var lastAddr = _connectPort.Value == 7777 ? _connectAddress.Value : $"{_connectAddress.Value}:{_connectPort.Value}";
+        _prevCursorLock = Cursor.lockState;
+        _prevCursorVisible = Cursor.visible;
         _connectPanel.Show(_playerName.Value, lastAddr);
     }
 
@@ -382,6 +399,8 @@ public class Core : MelonMod
     {
         _connectPanel.Close();
         SuspendCarControl(false);
+        Cursor.lockState = _prevCursorLock;
+        Cursor.visible = _prevCursorVisible;
     }
 
     /// <summary>Parse "host" or "host:port", persist name/address, then connect.</summary>

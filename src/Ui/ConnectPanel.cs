@@ -14,14 +14,17 @@ public sealed class ConnectPanel
     public bool Open { get; private set; }
     public string Name = "";
     public string Address = "";
-    /// <summary>Set by the Connect button; Core consumes it.</summary>
+    /// <summary>Set by the Connect button or Enter; Core consumes it.</summary>
     public bool ConnectRequested;
+    /// <summary>Set by the Cancel button or Esc; Core consumes it.</summary>
+    public bool CancelRequested;
 
     public void Show(string name, string address)
     {
         Name = name;
         Address = address;
         ConnectRequested = false;
+        CancelRequested = false;
         _focusPending = true;
         Open = true;
     }
@@ -32,6 +35,15 @@ public sealed class ConnectPanel
     {
         if (!Open) return;
         EnsureStyles();
+
+        // Enter / Esc must be taken from the IMGUI event stream: while a text field has keyboard
+        // focus, these keys are delivered here and not reliably through Input.GetKeyDown.
+        var e = Event.current;
+        if (e != null && e.type == EventType.KeyDown)
+        {
+            if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) { ConnectRequested = true; e.Use(); }
+            else if (e.keyCode == KeyCode.Escape) { CancelRequested = true; e.Use(); }
+        }
 
         const float w = 500f, h = 200f;
         var x = (Screen.width - w) / 2f;
@@ -49,9 +61,10 @@ public sealed class ConnectPanel
         GUI.Label(new Rect(x + 140f, y + 116f, w - 156f, 20f), "IP or hostname, optional :port   e.g. 100.99.206.114  or  abc.playit.gg:12345", _hint);
 
         if (GUI.Button(new Rect(x + 140f, y + 148f, 150f, 32f), "Connect   [Enter]", _button)) ConnectRequested = true;
-        if (GUI.Button(new Rect(x + 300f, y + 148f, 150f, 32f), "Cancel   [Esc]", _button)) Close();
+        if (GUI.Button(new Rect(x + 300f, y + 148f, 150f, 32f), "Cancel   [Esc]", _button)) CancelRequested = true;
 
-        if (_focusPending)
+        // Keep keyboard focus on the address field so typing always lands somewhere useful.
+        if (_focusPending || string.IsNullOrEmpty(GUI.GetNameOfFocusedControl()))
         {
             GUI.FocusControl(AddressControl);
             _focusPending = false;

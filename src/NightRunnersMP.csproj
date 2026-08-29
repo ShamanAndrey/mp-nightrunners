@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>NightRunnersMP</AssemblyName>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <RootNamespace>NightRunnersMP</RootNamespace>
     <GameDir>D:\itch\night-runners-private-alpha</GameDir>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -23,11 +23,12 @@
     <Reference Include="$(GameDir)\MelonLoader\Il2CppAssemblies\*.dll" Private="false" />
   </ItemGroup>
 
-  <!-- Mod DLL goes to Mods\, its dependencies to UserLibs\ (MelonLoader resolves from there). -->
+  <!-- Mod DLL goes to Mods\, its dependencies to UserLibs\ (MelonLoader resolves from there).
+       A running game locks the DLL; that only warns, so packaging still works. -->
   <Target Name="CopyToGame" AfterTargets="Build">
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\Mods" />
-    <Copy SourceFiles="$(OutDir)LiteNetLib.dll" DestinationFolder="$(GameDir)\UserLibs" />
-    <Message Text="Deployed $(AssemblyName).dll to $(GameDir)\Mods and LiteNetLib.dll to UserLibs" Importance="high" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\Mods" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
+    <Copy SourceFiles="$(OutDir)LiteNetLib.dll" DestinationFolder="$(GameDir)\UserLibs" ContinueOnError="WarnAndContinue" Retries="2" RetryDelayMilliseconds="500" />
+    <Message Text="Deploy attempted to $(GameDir) (a warning above means the game is running; close it and rebuild, or copy bin\Release\$(AssemblyName).dll by hand)" Importance="high" />
   </Target>
 
 </Project>
