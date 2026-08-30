@@ -98,6 +98,7 @@ public class Core : MelonMod
         var cityLighting = cat.CreateEntry("CitySceneLighting", true, description: "Use the Prologue's ambient light and fog while in the city");
         var citySkydome = cat.CreateEntry("CitySkydome", true, description: "Show the Prologue's panorama skydome (distant city/horizon) around the player");
         var citySkybox = cat.CreateEntry("CitySkybox", true, description: "Use the Prologue's sky (cubemap) while in the city; its lower half is the ground tone under the expressway");
+        var cityGround = cat.CreateEntry("CityGround", true, description: "Flat ground plane far below the city in the Prologue sky's lower tone (used when its sky cannot be shown)");
         if (Game.Variant == GameVariant.Alpha)
         {
             var classData = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserLibsDirectory, "classdata.tpk");
@@ -108,6 +109,7 @@ public class Core : MelonMod
                 UseSceneLighting = cityLighting.Value,
                 UseSkydome = citySkydome.Value,
                 UseSkybox = citySkybox.Value,
+                UseGround = cityGround.Value,
                 BookmarkFile = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, "NightRunnersMP-bookmarks.txt"),
             };
             var parts = _citySpawn.Value.Split(',');

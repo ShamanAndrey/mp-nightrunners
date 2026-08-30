@@ -172,6 +172,7 @@ public sealed class CityMap
 
         ApplyLightmaps();
         SetupSkydome();
+        SetupGround();
         DiagnoseRenderers("PERMA_ISLAND");
         _log($"[city] materials forced opaque (Autodesk Interactive cutout): {_materials.ForcedOpaque}");
         if (_importer.Lighting != null) _log($"[city] Prologue scene lighting: {_importer.Lighting}");
@@ -289,6 +290,46 @@ public sealed class CityMap
             _log($"[city] 3D skybox: dome mesh radius {_skydomeMeshRadius:F1} m scaled to {SkydomeRadius:F0} m, shader '{shader?.name}', texture {(mat.mainTexture == null ? "none" : mat.mainTexture.name)}");
         }
         catch (Exception e) { _log($"[city] skydome failed: {e.GetType().Name} {e.Message}"); }
+    }
+
+    public bool UseGround = true;
+    /// <summary>Prologue-frame height of the ground plane: below the deepest tunnel so nothing pokes through it.</summary>
+    public float GroundHeight = -40f;
+
+    /// <summary>
+    /// The Prologue has no ground mesh: below the horizon you see its sky cubemap. When that sky cannot be shown
+    /// (no cubemap shader in this game), lay a flat plane far below the city in the sky's lower-hemisphere tone.
+    /// </summary>
+    private void SetupGround()
+    {
+        if (!UseGround || _root == null || _importer?.Lighting == null) return;
+        if (_importer.Lighting.Skybox != null) return; // the real sky covers the lower hemisphere
+        var tone = _importer.Lighting.GroundColor ?? new Color(0.06f, 0.07f, 0.09f, 1f);
+        try
+        {
+            var go = new GameObject("NRMP_Ground");
+            go.transform.SetParent(_root.transform, false);
+            go.transform.localPosition = new Vector3(1200f, GroundHeight, -1350f); // centre of the C1 driving world
+            const float half = 12000f;
+            var mesh = new Mesh { name = "NRMP_Ground" };
+            mesh.vertices = new Il2CppStructArray<Vector3>(new[] { new Vector3(-half, 0, -half), new Vector3(-half, 0, half), new Vector3(half, 0, half), new Vector3(half, 0, -half) });
+            mesh.normals = new Il2CppStructArray<Vector3>(new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up });
+            mesh.triangles = new Il2CppStructArray<int>(new[] { 0, 1, 2, 0, 2, 3 });
+            mesh.RecalculateBounds();
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            var mat = new Material(Shader.Find("Standard")) { name = "NRMP_Ground", color = Color.black };
+            mat.EnableKeyword("_EMISSION");
+            mat.SetColor("_EmissionColor", tone);
+            mat.SetFloat("_Glossiness", 0f);
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            _log($"[city] ground plane at Prologue y {GroundHeight:F0} in tone {tone}");
+        }
+        catch (Exception e) { _log($"[city] ground plane failed: {e.GetType().Name} {e.Message}"); }
     }
 
     /// <summary>Keep the dome centred on the camera and sized to the far clip plane. Call every LateUpdate.</summary>

@@ -14,8 +14,9 @@ namespace NightRunnersMP.MapImport;
 /// </summary>
 public static class SkyboxReader
 {
-    public static Material? Read(PrologueData data, AssetsFileInstance file, AssetTypeValueField materialPptr, Action<string> log)
+    public static Material? Read(PrologueData data, AssetsFileInstance file, AssetTypeValueField materialPptr, Action<string> log, out Color? groundColor)
     {
+        groundColor = null;
         try
         {
             var me = data.Am.GetExtAsset(file, materialPptr);
@@ -50,6 +51,30 @@ public static class SkyboxReader
                 bytes = data.ReadStream(sd["path"].AsString, sd["offset"].AsLong, sd["size"].AsLong);
             }
             var faceSize = bytes.Length / 6;
+
+            // Tint and exposure of the Prologue's sky shader, applied to whatever we derive from the cubemap.
+            var tint = Color.white; var exposure = 1f; var rotation = 0f;
+            foreach (var c in props["m_Colors.Array"])
+                if (c["first"].AsString == "_Tint") tint = new Color(c["second"]["r"].AsFloat, c["second"]["g"].AsFloat, c["second"]["b"].AsFloat, 1f);
+            foreach (var f in props["m_Floats.Array"])
+            {
+                if (f["first"].AsString == "_Exposure") exposure = f["second"].AsFloat;
+                if (f["first"].AsString == "_Rotation") rotation = f["second"].AsFloat;
+            }
+
+            // Average colour of the -Y face (what the sky shows below the horizon): its 1x1 mip is the last DXT block.
+            if (tf == TextureFormat.DXT1 && mips > 1)
+            {
+                var o = 3 * faceSize + faceSize - 8;
+                Color C565(int v) => new Color(((v >> 11) & 31) / 31f, ((v >> 5) & 63) / 63f, (v & 31) / 31f, 1f);
+                var avg = (C565(bytes[o] | (bytes[o + 1] << 8)) + C565(bytes[o + 2] | (bytes[o + 3] << 8))) * 0.5f;
+                groundColor = new Color(avg.r * tint.r * exposure, avg.g * tint.g * exposure, avg.b * tint.b * exposure, 1f);
+            }
+
+            var shader = Shader.Find("Skybox/Cubemap");
+            if (shader == null && RenderSettings.skybox != null && RenderSettings.skybox.HasProperty("_Tex")) shader = RenderSettings.skybox.shader;
+            if (shader == null) { log($"[city] skybox: this game has no cubemap sky shader; using a ground plane in the sky's lower tone {groundColor}"); return null; }
+
             var cubemap = new Cubemap(size, tf, mips > 1) { name = cube["m_Name"].AsString };
             for (var face = 0; face < 6; face++)
             {
@@ -62,20 +87,13 @@ public static class SkyboxReader
                 UnityEngine.Object.Destroy(tex);
             }
 
-            var shader = Shader.Find("Skybox/Cubemap");
-            if (shader == null) { log("[city] skybox: this game has no Skybox/Cubemap shader"); return null; }
             var sky = new Material(shader) { name = "NRMP_Sky_" + mat["m_Name"].AsString };
             sky.SetTexture("_Tex", cubemap);
-            foreach (var c in props["m_Colors.Array"])
-                if (c["first"].AsString == "_Tint") sky.SetColor("_Tint", new Color(c["second"]["r"].AsFloat, c["second"]["g"].AsFloat, c["second"]["b"].AsFloat, c["second"]["a"].AsFloat));
-            foreach (var f in props["m_Floats.Array"])
-            {
-                var n = f["first"].AsString;
-                if (n == "_Exposure") sky.SetFloat("_Exposure", f["second"].AsFloat);
-                // The custom shader's rotation is a raw radian value; Skybox/Cubemap expects degrees.
-                if (n == "_Rotation") sky.SetFloat("_Rotation", Mathf.Repeat(f["second"].AsFloat * Mathf.Rad2Deg, 360f));
-            }
-            log($"[city] skybox: '{mat["m_Name"].AsString}' -> {wanted} '{cubemap.name}' {size}px {tf} {mips} mips, exposure {sky.GetFloat("_Exposure"):F2}, rotation {sky.GetFloat("_Rotation"):F0}°");
+            if (sky.HasProperty("_Tint")) sky.SetColor("_Tint", tint);
+            if (sky.HasProperty("_Exposure")) sky.SetFloat("_Exposure", exposure);
+            // The custom shader's rotation is a raw radian value; Skybox/Cubemap expects degrees.
+            if (sky.HasProperty("_Rotation")) sky.SetFloat("_Rotation", Mathf.Repeat(rotation * Mathf.Rad2Deg, 360f));
+            log($"[city] skybox: '{mat["m_Name"].AsString}' -> {wanted} '{cubemap.name}' {size}px {tf} {mips} mips via '{shader.name}', exposure {exposure:F2}, ground tone {groundColor}");
             return sky;
         }
         catch (Exception e) { log($"[city] skybox failed: {e.GetType().Name} {e.Message}"); return null; }

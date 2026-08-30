@@ -77,6 +77,7 @@ public sealed class SceneImporter
         public bool Fog; public Color FogColor; public int FogMode; public float FogDensity, FogStart, FogEnd;
         public float ReflectionIntensity = 1f; public int ReflectionMode; public string Scene = "";
         public Material? Skybox;
+        public Color? GroundColor;
         public override string ToString() => $"from {Scene}: ambientMode={AmbientMode} sky={AmbientSky} equator={AmbientEquator} ground={AmbientGround} intensity={AmbientIntensity:F2} reflectionIntensity={ReflectionIntensity:F2} reflectionMode={ReflectionMode} fog={Fog} fogMode={FogMode} density={FogDensity:F4} color={FogColor}";
     }
 
@@ -349,7 +350,11 @@ public sealed class SceneImporter
                 ReflectionMode = bf["m_DefaultReflectionMode"].IsDummy ? 0 : bf["m_DefaultReflectionMode"].AsInt,
                 Scene = CurrentScene,
             };
-            if (ImportSkybox && !bf["m_SkyboxMaterial"].IsDummy) Lighting.Skybox = SkyboxReader.Read(_data, inst, bf["m_SkyboxMaterial"], _log);
+            if (ImportSkybox && !bf["m_SkyboxMaterial"].IsDummy)
+            {
+                Lighting.Skybox = SkyboxReader.Read(_data, inst, bf["m_SkyboxMaterial"], _log, out var ground);
+                Lighting.GroundColor = ground;
+            }
             break;
         }
     }
