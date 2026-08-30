@@ -6,7 +6,8 @@
 alpha's free roam to load the Prologue's city and drive it — read at runtime from your own Prologue install,
 nothing is redistributed. Roads, buildings, tunnels, streetlights, baked lightmaps, the Prologue's ambient
 light and its sky. About 20 seconds to load and ~2 GB of extra memory; the whole city stays loaded.
-Known gaps: no traffic in the city, no garages or meet spots, some lighting differs from the Prologue.
+Known gaps: no ground below the expressway (the Prologue draws it with its sky, which the alpha cannot show),
+no traffic in the city, no garages or meet spots, some lighting differs from the Prologue.
 
 **Teleport control.** F2 again opens a menu (arrows / W-S / Enter / mouse) with every area of the city,
 your bookmarks and "back to Mount Haruna". Chat equivalents: `/tp list`, `/tp <area>`, `/tp next`,

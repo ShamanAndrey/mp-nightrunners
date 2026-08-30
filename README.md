@@ -92,8 +92,9 @@ area of the city grouped by district, your bookmarks, back to Mount Haruna, unlo
 available as `/tp` chat commands.
 
 Status: **experimental.** Multiplayer on the city works like anywhere else (everyone must load it). Not yet:
-traffic in the city, the Prologue's garages and meet spots, distance-based streaming (the whole city stays
-loaded — it uses about 2 GB of extra memory).
+ground below the expressway (the Prologue draws it with its sky, which the alpha cannot show), traffic in the
+city, the Prologue's garages and meet spots, distance-based streaming (the whole city stays loaded — it uses
+about 2 GB of extra memory).
 
 ## Hosting
 
