@@ -29,7 +29,7 @@ if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force }
 New-Item -ItemType Directory -Force "$pkg\Mods", "$pkg\UserLibs" | Out-Null
 Copy-Item (Join-Path $root 'src\bin\Release\NightRunnersMP.dll') "$pkg\Mods\"
 Copy-Item (Join-Path $root 'src\bin\Release\LiteNetLib.dll') "$pkg\UserLibs\"
-Copy-Item (Join-Path $root 'installer\*') $pkg -Recurse
+Copy-Item (Join-Path $root 'installer\*') $pkg -Recurse -Force
 
 $zip = Join-Path $root "dist\NightRunnersMP-v$version.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }

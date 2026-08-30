@@ -85,7 +85,7 @@ foreach ($i in $installs) {
     Ok "$($i.Game.Name): $game"
     $procName = [IO.Path]::GetFileNameWithoutExtension($i.Game.Exe)
     if (Get-Process -Name $procName -ErrorAction SilentlyContinue) { Warn 'game is running - skipped; close it and run again'; continue }
-    foreach ($f in 'Mods\NightRunnersMP.dll', 'UserLibs\LiteNetLib.dll') {
+    foreach ($f in 'Mods\NightRunnersMP.dll', 'UserLibs\LiteNetLib.dll', 'UserLibs\AssetsTools.NET.dll', 'UserLibs\classdata.tpk') { # AssetsTools entry cleans up v0.4.0 test installs
         $p = Join-Path $game $f
         if (Test-Path $p) { Remove-Item $p -Force; Ok "removed $f" }
     }

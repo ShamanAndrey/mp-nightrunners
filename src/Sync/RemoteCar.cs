@@ -63,6 +63,7 @@ public sealed class RemoteCar
     public bool IsHidden => _hidden;
     public bool Collisions => _collisions;
     public bool HasSnapshot => _buf.Count > 0;
+    /// <summary>Newest snapshot position in true world coordinates (see WorldOrigin).</summary>
     public Vector3 LastKnownPos => _buf.Count > 0 ? _buf[^1].Pos : Vector3.zero;
     public Quaternion LastKnownRot => _buf.Count > 0 ? _buf[^1].Rot : Quaternion.identity;
     public float LastSnapshotAge => _buf.Count > 0 ? Time.realtimeSinceStartup - _lastArrival : float.NaN;
@@ -199,12 +200,12 @@ public sealed class RemoteCar
         return true;
     }
 
-    /// <summary>Current display pose: interpolated truth plus the (decaying) correction offset.</summary>
+    /// <summary>Current display pose in local (shifted) coordinates: interpolated truth plus the decaying correction.</summary>
     private bool CurrentPose(out Vector3 pos, out Quaternion rot, out CarState state)
     {
         if (!Evaluate(RenderTime, out var p, out var r, out state)) { pos = default; rot = Quaternion.identity; return false; }
         rot = _errRot * r;
-        pos = p + _errPos + rot * LocalOffset;
+        pos = WorldOrigin.ToLocal(p + _errPos) + rot * LocalOffset;
         return true;
     }
 

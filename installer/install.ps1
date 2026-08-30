@@ -21,7 +21,7 @@ $Games = @(
     @{ Key = 'prologue'; Name = 'Night Runners Prologue (Steam)';      Exe = 'NIGHT-RUNNERS PROLOGUE.exe' }
 )
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ModFiles = @('Mods\NightRunnersMP.dll', 'UserLibs\LiteNetLib.dll')
+$ModFiles = @('Mods\NightRunnersMP.dll', 'UserLibs\LiteNetLib.dll', 'UserLibs\classdata.tpk')
 
 function Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "    $m" -ForegroundColor Green }

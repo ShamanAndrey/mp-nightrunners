@@ -91,7 +91,7 @@ public sealed class ChatPanel
 
         GUI.SetNextControlName(InputControl);
         Text = GUI.TextField(new Rect(x + Pad, ly, Width - Pad * 2, LineH + 2f), Text, 200, _field);
-        GUI.Label(new Rect(x + Pad, ly + LineH + 2f, Width - Pad * 2, LineH), "<color=#a0a0a0>game controls are paused while you type — Enter sends, Esc cancels</color>", _text);
+        GUI.Label(new Rect(x + Pad, ly + LineH + 2f, Width - Pad * 2, LineH), "<color=#a0a0a0>game controls are paused while you type — Enter sends, Esc cancels, /help for commands</color>", _text);
         if (_focusPending || string.IsNullOrEmpty(GUI.GetNameOfFocusedControl()))
         {
             GUI.FocusControl(InputControl);

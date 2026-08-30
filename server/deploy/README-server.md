@@ -25,7 +25,7 @@ command -v ufw >/dev/null && ufw allow 7777/udp
 systemctl daemon-reload && systemctl enable --now nrmp-server
 sleep 2 && systemctl --no-pager status nrmp-server | head -5 && journalctl -u nrmp-server -n 3 --no-pager
 ```
-Expected last line: `listening on UDP 7777 (protocol NRMP-0.4, ...)`. Updating later = re-run the same paste.
+Expected last line: `listening on UDP 7777 (protocol NRMP-x.y, ...)`. Updating later = re-run the same paste.
 
 Live log: `journalctl -u nrmp-server -f`. Manual copy instead of curl: `scp dist\server\linux-x64\nrmp-server root@VPS:/opt/nrmp/`.
 Rules are set in `ExecStart` inside the unit file (`--traffic on|off --collisions on|off`); after editing it:
@@ -75,5 +75,5 @@ one build never see the other — different maps). Restrict with `--game prologu
 
 ## Notes
 - UDP 7777 must be open in **both** the OS firewall (ufw) and the provider's firewall panel (Hostinger: VPS → Firewall).
-- Protocol key `NRMP-0.4`: players on a different mod version are rejected at connect ("ConnectionRejected").
+- Protocol key (currently `NRMP-0.6`): players on a different mod version are rejected at connect ("ConnectionRejected").
 - Bandwidth per player pair is tiny at full rate (~3 KB/s) and drops with distance; a $4 VPS handles dozens of players.

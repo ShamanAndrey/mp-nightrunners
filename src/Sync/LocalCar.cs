@@ -45,7 +45,7 @@ public static class LocalCar
         return new CarState
         {
             T = physicsTime,
-            Pos = rb != null ? rb.position : t.position,
+            Pos = WorldOrigin.ToWorld(rb != null ? rb.position : t.position), // true world coordinates on the wire
             Rot = rb != null ? rb.rotation : t.rotation,
             Vel = rb != null ? rb.velocity : Vector3.zero,
             AngVel = rb != null ? rb.angularVelocity : Vector3.zero,

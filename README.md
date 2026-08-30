@@ -1,131 +1,210 @@
-# Night Runners Multiplayer Mod
+# Night Runners MP
 
-A multiplayer sync mod for **Night Runners** (PLANET JEM), built with MelonLoader.
+Multiplayer for **Night Runners** (PLANET JEM): see your friends' cars on the mountain, drive together, chat —
+plus an experimental import of the Prologue's **C1 Tatsumi city** into the alpha.
 
-**Supported builds:** the itch **private alpha** (Unity 2019.4, Mount Haruna) and the Steam **Prologue**
-(Unity 2018.4, the C1 Tatsumi city). One mod DLL serves both; the installer finds either or both. The two
-builds have different maps and car lists, so a session is always one build or the other — the relay
-server keeps them in separate rooms and the in-game host only accepts its own build.
+Built on MelonLoader. Works with the itch **private alpha** (Mount Haruna) and the Steam **Prologue** (C1 Tatsumi).
+The mod never redistributes game files: everything it shows comes from the games you already own.
 
-## For players
+- [Install](#install) · [Play](#play) · [Controls](#controls) · [Chat commands](#chat-commands)
+- [The city in the alpha](#the-city-in-the-alpha)
+- [Hosting](#hosting) · [Configuration](#configuration) · [Troubleshooting](#troubleshooting)
+- [For developers](#for-developers)
 
-1. Download the latest `NightRunnersMP-v*.zip` from the [Releases page](https://github.com/ShamanAndrey/mp-nightrunners/releases/latest) and extract it.
-2. Double-click **`Install.bat`** — it finds the game, installs MelonLoader if needed, installs the mod, and asks for your name and the host's address.
-3. First launch takes a few minutes (MelonLoader prepares files). Then: drive into free-roam, **F11** to host, or **F12** to type the host's address and connect.
+---
 
-Hosting without port-forwarding: use [playit.gg](https://playit.gg) (UDP tunnel — ngrok does **not** carry UDP), Tailscale, or a LAN. `Uninstall.bat` removes everything again.
+## Install
 
-Sessions can be password-protected: hosts set `HostPassword` in the config (servers use `--password`), players type it in the F12 panel. See `SECURITY.md` for what is and isn't protected.
+1. Download `NightRunnersMP-v*.zip` from the [latest release](https://github.com/ShamanAndrey/mp-nightrunners/releases/latest) and extract it anywhere.
+2. Double-click **`Install.bat`**. It finds your game(s) — alpha, Prologue or both — installs MelonLoader if
+   needed, copies the mod, and asks for your player name and the server address you want to use.
+3. Start the game normally. The **first launch takes a few minutes** while MelonLoader prepares its files; later
+   launches are quick.
 
-The HUD title shows whether you're on the latest release; when a newer one exists, **F4** opens the download page (disable with `CheckForUpdates = false`). Everyone in a session must run the same version.
+`Uninstall.bat` removes the mod and MelonLoader again. Updating: install the new zip over the old one — the
+game's config and your bookmarks are kept.
 
-> **Note:** this repo must never contain game files or game-derived assets. `refs/` holds
-> locally generated reverse-engineering output and is gitignored — do not commit or publish it.
+The HUD title tells you whether you are on the latest version. If not, **F4** opens the download page. Everyone
+in a session must run the same version.
 
-## Layout
+## Play
 
-- `src/` — the C# MelonLoader plugin
-- `refs/dump/` — Il2CppDumper output from `GameAssembly.dll` (regenerate after every game update)
+1. Drive into **free roam**.
+2. **F12** → type the server address (or a friend's IP), your name and the password if there is one → **Enter**.
+3. Your friends appear as cars with a name tag. **T** opens chat.
 
-## Game tech notes
+To play without a server, one player presses **F11** to host and the others connect to that player's address
+(see [Hosting](#hosting)). A session is always one game build: alpha players play with alpha players, Prologue
+with Prologue — the server keeps them in separate rooms.
 
-Two builds, one API: every class the mod hooks (`CarParent`, `GodConstant`, `RCC_*`, `CarLocalCustom`,
-`car_overwrite`, Rewired) exists with identical signatures in both. Differences handled in
-`Sync/GameVariant.cs` and `Sync/TrafficControl.cs`: traffic is `TrafficCoordinator` (alpha) vs
-`GodConstant.trafficManager` / `sceneManager_traffic` (Prologue, via reflection); streamed sub-scenes are
-`MountHaruna_Chunk_N` vs `C1_AREA_*` / tunnels / collider & building layers; the car list is ~70 vs ~20 models.
-Dumps for both live in `refs/dump` (alpha) and `refs/dump-prologue`.
+What is synchronised: car model and position/rotation/velocity, steering, lights, RPM and gear, so remote cars
+roll their wheels and sound like they should. AI traffic is local to each player (not synced). Remote cars are
+hidden after five seconds without data (their owner is in a menu or the garage) and return when data resumes.
 
-### Alpha (itch)
+## Controls
 
-- Unity **2019.4.41f2**, IL2CPP (metadata v24.5, unencrypted). Addressables, Easy Save 3, Rewired.
-- Car physics: **RCC — Realistic Car Controller V3** (`RCC_CarControllerV3`, `RCC_SceneManager`).
-- Car spawning: `CarParent` MonoBehaviour — `AICarSpawn(...)`, `StockCarSpawn(...)`,
-  `OwnedCarSpawn(...)`, all take a spawn `Transform`; `car_overwrite` describes a full car build
-  (model, parts, paint) → can materialize a remote player's exact car.
-- Livery/paint sync surface: `car_AIRacer.AILivery : Texture` + paint color fields.
-- Deprecated UNet is compiled into the build — do not use; networking via bundled LiteNetLib.
+| Key | What it does |
+|-----|--------------|
+| **F12** | Connect panel: address, name, password. Enter connects, Esc cancels. Remembers your last entries. |
+| **F11** | Host a session yourself on `HostPort` (default 7777). |
+| **F8** | Disconnect and remove the other cars. |
+| **T** | Open the chat line (Enter sends, Esc cancels). Rebind with `ChatKey`. Works outside sessions too, for commands. |
+| **F5** | Car collisions on/off. On: other cars are solid. **Host decides** for the whole session. |
+| **F6** | AI traffic on/off. **Host decides** for the whole session; your own setting returns when you leave. |
+| **F3** | Your personal profanity filter (masks words *you* see, e.g. `f***`). |
+| **F7** | Show/hide the HUD. |
+| **F4** | Open the releases page when an update exists. |
+| **F2** | Alpha only: load the Prologue's city / open the teleport menu. See [below](#the-city-in-the-alpha). |
+| **F9** | Write a status snapshot to the MelonLoader log (for bug reports). |
 
-## Architecture (planned)
+While a text box is open the mod pauses the game's keyboard input and car control, so typing never shifts gears
+or opens menus. The same pause applies while the game window is unfocused (`BlockInputWhenUnfocused`), because
+the game otherwise keeps reacting to keys while you are tabbed out.
 
-- MelonLoader plugin (Unity 2019.4 IL2CPP), Harmony hooks via Il2CppInterop.
-- LiteNetLib UDP; one player hosts, clients own their car state (peer-trust).
-- Remote cars: spawned via `CarParent`, kinematic rigidbody, ~100 ms interpolation buffer,
-  20–30 Hz state packets (pos, rot, velocity, steer, throttle/brake, RPM, gear, lights).
-- AI traffic stays local-only (not synced).
+## Chat commands
 
-## Roadmap
+| Command | Effect |
+|---------|--------|
+| `/help` | List commands and keys. |
+| `/filter on` / `/filter off` | Personal profanity filter (same as F3). Extra words: `UserData\NightRunnersMP-badwords.txt`, one per line, trailing `*` for prefixes. |
+| `/tp list` | Areas and bookmarks you can teleport to (city loaded). |
+| `/tp <area>` · `/tp next` · `/tp prev` | Jump to an area of the city, or step through its roads one by one. |
+| `/tp save <name>` · `/tp <name>` | Bookmark your current spot / return to it. Bookmarks persist in `UserData\NightRunnersMP-bookmarks.txt`. |
+| `/tp x y z` | Teleport to Prologue coordinates. |
+| `/tp back` | Back to where you were on Mount Haruna. |
+| `/city unload` | Free the city's memory. |
+| `/city lighting on\|off` · `/city skydome on\|off` | Compare the Prologue's lighting / horizon with the alpha's. |
+| `/shot` · `/shot top [height]` · `/shot side` | Save a screenshot (normal, bird's-eye, or side view) to `UserData\NightRunnersMP-shots\`. Handy for bug reports. |
 
-- **v0.1** — two players free-roam, see each other driving (transform sync only)
-- **v0.2** — correct car models/customization/liveries, RPM-driven engine audio, lights
-- **v0.3** — lobby UI, chat, synced race starts
+## The city in the alpha
 
-## Controls (v0.1)
+The alpha ships one map, Mount Haruna. The Steam Prologue ships the much larger **C1 Tatsumi** city. If you own
+both, the mod can rebuild the city inside the alpha: press **F2** in free roam.
 
-| Key | Action |
-|-----|--------|
-| F3  | Toggle your personal profanity filter (also `/filter on` / `/filter off` in chat; saved as `ChatFilter`). Masks chat and names *you* see (`f***`); extra words in `UserData\NightRunnersMP-badwords.txt`. Servers can enforce a filter for everyone with `--filter on` |
-| Enter | Open the chat line while in a session (`ChatKey` in the config to rebind); Enter sends, Esc cancels. Messages fade after 15 s; join/leave and server notices appear as grey lines |
-| F4  | Open the GitHub releases page (the HUD title says whether an update exists) |
+The first load takes about 20 seconds and reads the city straight from **your** Prologue installation on
+Steam — meshes, textures, materials, colliders, streetlights, baked lightmaps, the Prologue's ambient light and
+its horizon skybox. Nothing is copied into the alpha and nothing is redistributed; every player who wants to
+drive the city needs the Prologue installed. The install is found automatically through Steam; set `PrologueDir`
+if it lives somewhere unusual.
 
-While a text box is open the mod disables Rewired's keyboard controller (the game's input system) and RCC's
-car control, so typing never shifts gears, pulls the handbrake or opens menus. `BlockInputWhenUnfocused`
-(default on) applies the same block while the game window is in the background, since the game otherwise
-keeps reacting to keys while you are tabbed out.
-| F5  | Toggle car collisions (persisted as `GhostCollisions`). **Host-controlled in a session** like traffic. On: ghosts are solid and moved through PhysX (`MovePosition`, interpolated) so contacts carry momentum; off: cars pass through each other |
-| F6  | Toggle AI traffic (persisted as `TrafficEnabled`; "off" clears existing traffic and is re-applied on every map load). **Host-controlled in a session:** the host's rule is sent to clients on join and on change; a client's F6 is ignored until it disconnects, then its own setting is restored |
-| F7  | Toggle the in-game HUD (on by default: car, host/client, ghosts, recent log) |
-| F9  | Write a status snapshot to the log |
-| F11 | Host a session on `HostPort` |
-| F12 | Open the connect panel: type your name and the host address (`host` or `host:port`), Enter to connect, Esc to cancel. Car controls are suspended while it's open. Saved to the config for next time. (Hosting + `127.0.0.1` → loopback self-test) |
-| F8  | Disconnect and remove ghosts |
+Once loaded, **F2** opens the teleport menu (arrow keys / W-S, Enter, Esc; the mouse works too): spawn road, every
+area of the city grouped by district, your bookmarks, back to Mount Haruna, unload. The same things are
+available as `/tp` chat commands.
 
-Config lives in `<game>\UserData\MelonPreferences.cfg` under `[NightRunnersMP]`:
-`PlayerName`, `HostPort`, `ConnectAddress`, `ConnectPort`, `SendRateHz` (25; rounded to whole physics steps), `InterpDelayMs` (80; floor for the adaptive interpolation delay), `GhostCollisions` (false; true makes remote cars solid — one-way, like walls), `GhostOffset` (4; metres to shift **only the loopback ghost** right — real players are never offset).
+Status: **experimental.** Multiplayer on the city works like anywhere else (everyone must load it). Not yet:
+traffic in the city, the Prologue's garages and meet spots, distance-based streaming (the whole city stays
+loaded — it uses about 2 GB of extra memory).
 
-Remote cars show a floating name tag with distance, spin their wheels from synced velocity, and are hidden after 5 s without packets (owner in garage/menu) and shown again when packets resume.
+## Hosting
 
-### Distance-scaled update rates (`Sync/SendRate.cs`)
+**Easiest: a relay server.** Run `nrmp-server` on any machine with a public address (a cheap VPS is plenty).
+Players connect *out* to it with F12, so nobody port-forwards or installs a VPN. The server owns the session
+rules (traffic, collisions), supports a password, and lets the operator `kick`, `ban` and `unban` from its
+console or the `admin.cmd` file. Build it with `.\tools\publish-server.ps1`; `server\deploy\README-server.md`
+has the step-by-step VPS setup with a systemd unit.
 
-Every snapshot stream is paced by the distance between the two cars involved: **0–50 m full rate
-(`SendRateHz`), 50–150 m 10 Hz, 150–400 m 4 Hz, beyond 1 Hz**, with 20 % hysteresis before dropping
-a tier. Each sender paces its upload by its nearest known player; the host additionally paces every
-(sender → recipient) relay pair, which is what keeps the host's upload sane with many players.
-The receiver notices rate drops within a packet or two and stretches its prediction window,
-correction time and snap threshold with the measured interval, so far cars stay plausible at 1 Hz.
+**Without a server:** one player presses **F11**. The others need to reach that player's UDP `HostPort`
+(default 7777): forward the port on the router, or use a LAN / [Tailscale](https://tailscale.com) /
+[playit.gg](https://playit.gg) (UDP tunnel — ngrok does **not** carry UDP). The host's F5/F6 settings apply to
+everyone. Set `HostPassword` to keep strangers out.
 
-### Smoothing (`Sync/RemoteCar.cs`)
+`SECURITY.md` explains exactly what goes over the wire and what is protected. Short version: only names and car
+motion are sent, nothing from your system or save; every packet is validated and rate-limited; but the
+connection is plain UDP, not encrypted.
 
-Snapshots are sampled in the sender's `FixedUpdate` and stamped with `Time.fixedTime`. The receiver estimates the clock offset (chasing the lowest observed latency), renders `max(InterpDelayMs, 2×interval + 3×jitter)` behind the newest snapshot, uses cubic Hermite (position + velocity) between snapshots, dead-reckons from velocity/angular velocity when data is late (≤300 ms), and dissolves any correction over ~80 ms instead of snapping (jumps >5 m snap). The HUD shows each ghost's delay, jitter and mode (`interp` / `predict Nms` / `hold`).
+## Configuration
 
-**Solo loopback test:** drive in free-roam → F11 → F12. Your own car's state travels host→client→host through real UDP and a ghost copy of your car appears 4 m to your right, mirroring you with ~100 ms latency.
+`<game>\UserData\MelonPreferences.cfg`, section `[NightRunnersMP]`. Everything has a sensible default; the
+installer fills in your name and server.
 
-**Two players:** both install MelonLoader + `NightRunnersMP.dll` (Mods) + `LiteNetLib.dll` (UserLibs). Host forwards UDP `HostPort` on their router (or both use Radmin VPN / ZeroTier / Tailscale and use the VPN IP). Host: drive in free-roam, F11. Friend: set `ConnectAddress` to the host's IP, drive in free-roam, F12. Both must be on the same map.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `PlayerName` | `Runner` | Name shown above your car and in chat. |
+| `ConnectAddress`, `ConnectPort`, `ConnectPassword` | `127.0.0.1`, `7777`, empty | What F12 starts with (also editable in the panel). |
+| `HostPort`, `HostPassword` | `7777`, empty | For hosting with F11. |
+| `ChatKey` | `T` | Key that opens chat (a Unity KeyCode name). |
+| `ChatFilter` | `false` | Personal profanity filter. |
+| `GhostCollisions` | `false` | Other cars are solid (host-controlled in a session). |
+| `TrafficEnabled` | `true` | AI traffic (host-controlled in a session). |
+| `BlockInputWhenUnfocused` | `true` | Pause game input while the window is unfocused. |
+| `CheckForUpdates` | `true` | Ask GitHub once per launch whether a newer release exists. |
+| `SendRateHz` | `25` | Snapshots per second at close range. |
+| `InterpDelayMs` | `80` | Minimum smoothing delay; raised automatically when the connection jitters. |
+| `PrologueDir` | auto | Steam Prologue folder, for the city import. |
+| `CityLightmaps`, `CitySceneLighting`, `CitySkybox`, `CitySkydome` | `true` | Import the Prologue's baked lighting / ambient & fog / sky cubemap / horizon panorama. |
+| `CitySpawn`, `CitySpawnYaw` | — | Fallback spawn in Prologue coordinates (normally not needed). |
+| `GhostOffset` | `0` | Dev only: shift remote cars sideways (set 4 for the loopback self-test). |
 
-## Dedicated server (`server/`)
+## Troubleshooting
 
-`nrmp-server` is a standalone relay that plays the host role without a car: players connect *out* to
-it (F12 → its address), so nobody port-forwards or uses a VPN. It assigns ids, relays snapshots paced
-by distance, owns the traffic/collision rules (`--traffic on|off --collisions on|off`, or console
-commands at runtime), can spawn `--bots N` fake players that orbit you for solo testing, and supports
-`kick` / `ban` / `unban` with a persistent ban list — from the console or via `admin.cmd` under systemd.
-`.\tools\publish-server.ps1` produces single-file binaries in `dist\server\` (Linux + Windows);
-`server\deploy\README-server.md` has the VPS install steps (systemd unit included).
-It shares no code with the mod — `server/Protocol.cs` mirrors `src/Net/Packets.cs`; change both together.
+- **"Version mismatch" / cannot connect** — everyone needs the same mod version, and the server must be updated
+  too. The protocol key includes the version and the game build.
+- **Nothing happens on F12 / keys** — you must be in free roam, in a car. The HUD (F7) shows the mod's state.
+- **Friend's car is jerky** — that is the network, not the game: the HUD shows each car's delay, jitter and
+  whether it is interpolating or predicting. Beyond 150 m cars update at lower rates by design.
+- **Typing in chat drives the car** — make sure `BlockInputWhenUnfocused` is on and you are on the current
+  version; the mod disables the game's keyboard while a text box is open.
+- **City: cannot load** — the Prologue must be installed via Steam; check the MelonLoader log for `[city]` lines
+  and set `PrologueDir` if it was not found.
+- **Bug reports** — attach `MelonLoader\Latest.log` and, if it is visual, a `/shot` screenshot.
 
-## Shipping a release
+---
 
-`.\tools\release.ps1` builds, assembles `dist\pkg\` (DLLs + everything in `installer\`), and zips it as
-`dist\NightRunnersMP-v<Version>.zip` (version from the csproj — bump `<Version>` and the `MelonInfo` string together).
-Publish with `gh release create v<version> dist\NightRunnersMP-v<version>.zip`. Never include game files.
-The installer (`installer\install.ps1`) is offline: it only downloads MelonLoader.
+## For developers
 
-## Dev workflow
+### Repository layout
 
-1. Game install: `D:\itch\night-runners-private-alpha` (MelonLoader + built DLL in `Mods\` are
-   the only things that live there).
-2. First launch after installing MelonLoader generates interop assemblies under
-   `MelonLoader\Il2CppAssemblies\` — the plugin project references those.
-3. Post-build step copies the plugin DLL into the game's `Mods\` folder.
-4. After a game update: re-run Il2CppDumper into `refs/dump/`, delete the generated interop
-   assemblies, relaunch, rebuild.
+| Path | Contents |
+|------|----------|
+| `src/` | The mod (C#, MelonLoader, Il2CppInterop). `Net/` protocol and sessions, `Sync/` car state, smoothing and game glue, `Ui/` HUD, panels and chat, `MapImport/` the city importer. |
+| `shared/` | Code compiled into both the mod and the server (profanity filter). |
+| `server/` | `nrmp-server`, the standalone relay. `server/Protocol.cs` mirrors `src/Net/Packets.cs` — change both together. |
+| `installer/` | `Install.bat` / `Uninstall.bat` and the PowerShell behind them. Offline except for the MelonLoader download. |
+| `tools/` | `release.ps1` (build + zip), `publish-server.ps1` (single-file server binaries), `nrmp-ping` (protocol probe/fuzzer), `nrmp-mapinspect` (reads Prologue scene files without Unity). |
+| `refs/` | Il2CppDumper output for both games. **Gitignored** — game-derived, never commit. |
+
+### Building
+
+- .NET SDK; the mod targets MelonLoader's `net6` runtime and references the interop assemblies MelonLoader
+  generates on the game's first launch (`<game>\MelonLoader\Il2CppAssemblies\`).
+- `dotnet build src -c Release` builds and copies the DLL (plus `LiteNetLib.dll` and `UserLibs\classdata.tpk`)
+  into the alpha and, if present, the Prologue. Copies are skipped while a game is running and holds the file.
+- After a game update: rerun Il2CppDumper into `refs/dump` (alpha) or `refs/dump-prologue`, delete the generated
+  interop assemblies, launch once, rebuild.
+
+### Releasing
+
+Bump `<Version>` in `src/NightRunnersMP.csproj` and the `MelonInfo` version in `src/Core.cs` together, then
+`.\tools\release.ps1` → `dist\NightRunnersMP-v<version>.zip`, and
+`gh release create v<version> dist\NightRunnersMP-v<version>.zip`. Deploy the matching server with
+`.\tools\publish-server.ps1` (the protocol key changes with the version).
+
+### How it works
+
+**Networking.** LiteNetLib UDP. The host — a player (F11) or the relay server — assigns ids and relays fixed-size
+state packets. Each stream is paced by the distance between the two cars: full rate within 50 m, then 10 / 4 /
+1 Hz at 150 / 400 m and beyond, with hysteresis. Receivers sample snapshots stamped with the sender's physics
+time, estimate the clock offset, render `max(InterpDelayMs, 2×interval + 3×jitter)` behind the newest
+snapshot with cubic Hermite interpolation, dead-reckon when data is late, and dissolve corrections over ~80 ms
+instead of snapping. Session rules (traffic, collisions) come from the host. Every inbound packet is parsed
+under a guard with size, range and rate checks (`SECURITY.md`).
+
+**Game glue.** Both builds expose the same classes (`CarParent` spawns cars, `RCC_CarControllerV3` drives them,
+`GodConstant` holds the world, Rewired reads input). Differences live in `Sync/GameVariant.cs` and
+`Sync/TrafficControl.cs`; the alpha additionally uses a floating origin, handled by `Sync/WorldOrigin.cs`.
+
+**City import** (`src/MapImport/`). AssetsTools.NET reads the Prologue's serialized scenes at runtime using
+`classdata.tpk` (Unity type information). The importer rebuilds the original GameObject hierarchy (needed:
+the map's zones are Blender-style parents rotated −90° and scaled ×27), decodes meshes from raw vertex
+streams, uploads DXT/BC6H textures as-is, remaps materials onto the alpha's Standard shader, keeps colliders
+on the physics layer, appends the Prologue's lightmaps to the alpha's, and replays what the Prologue's own
+streaming script would do: only the driving scenes (`C1_1` + `C1_AREA_*`), no far-LOD proxies, tunnel shells
+switched on, the horizon skybox scaled to the far clip plane. Imported renderers ignore the alpha's light
+probes (which are black outside Mount Haruna) and take the Prologue's ambient instead. `tools/nrmp-mapinspect`
+is the offline companion for looking at scenes, meshes, materials, lightmaps and textures.
+
+### Ground rules
+
+- Never commit game files or game-derived assets. `refs/` and `dist/` are gitignored for that reason.
+- Change `src/Net/Packets.cs` and `server/Protocol.cs` together and bump the protocol version.
+- Keep the installer offline (MelonLoader is the only download).

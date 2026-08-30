@@ -164,7 +164,7 @@ public sealed class GhostManager
         var spawnPoint = new GameObject("NRMP_SpawnPoint").transform;
         if (next.HasSnapshot)
         {
-            spawnPoint.position = next.LastKnownPos;
+            spawnPoint.position = WorldOrigin.ToLocal(next.LastKnownPos);
             spawnPoint.rotation = next.LastKnownRot;
         }
         else

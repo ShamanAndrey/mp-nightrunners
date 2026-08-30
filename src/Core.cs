@@ -1,12 +1,13 @@
 using System.Collections.Generic;
 using Il2Cpp;
 using MelonLoader;
+using NightRunnersMP.MapImport;
 using NightRunnersMP.Net;
 using NightRunnersMP.Sync;
 using NightRunnersMP.Ui;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.3.0", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
+[assembly: MelonInfo(typeof(NightRunnersMP.Core), "Night Runners MP", "0.4.0", "ShamanAndrey", "https://github.com/ShamanAndrey/mp-nightrunners")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PRIVATE ALPHA")]
 [assembly: MelonGame("PLANET JEM SOFTWARE", "NIGHT-RUNNERS PROLOGUE")]
 
@@ -48,8 +49,13 @@ public class Core : MelonMod
     private bool _controlSuspended;
     private MelonPreferences_Entry<bool> _blockUnfocused = null!;
     private MelonPreferences_Entry<bool> _chatFilter = null!;
+    private MelonPreferences_Entry<string> _prologueDir = null!;
+    private MelonPreferences_Entry<string> _citySpawn = null!;
+    private MelonPreferences_Entry<float> _citySpawnYaw = null!;
+    private CityMap? _city;
 
-    private bool TextBoxOpen => _connectPanel.Open || _chat.InputOpen;
+    private readonly TeleportPanel _teleport = new();
+    private bool TextBoxOpen => _connectPanel.Open || _chat.InputOpen || _teleport.Open;
     private CursorLockMode _prevCursorLock;
     private bool _prevCursorVisible;
 
@@ -74,11 +80,40 @@ public class Core : MelonMod
         _checkUpdates = cat.CreateEntry("CheckForUpdates", true, description: "Ask GitHub once per launch whether a newer release exists (shown in the HUD title)");
         _hostPassword = cat.CreateEntry("HostPassword", "", description: "When hosting with F11, players must enter this password to join (empty = open)");
         _connectPassword = cat.CreateEntry("ConnectPassword", "", description: "Password used by F12 (also editable in the connect panel)");
-        _chatKey = cat.CreateEntry("ChatKey", "Return", description: "Key that opens the chat line while in a session (Unity KeyCode name: Return, T, Y, ...)");
-        if (!System.Enum.TryParse(_chatKey.Value, true, out _chatKeyCode)) _chatKeyCode = KeyCode.Return;
+        _chatKey = cat.CreateEntry("ChatKey", "T", description: "Key that opens the chat line (Unity KeyCode name: T, Y, Return, ...). Enter is avoided by default because the game uses it to interact.");
+        if (_chatKey.Value.Equals("Return", System.StringComparison.OrdinalIgnoreCase))
+        {
+            _chatKey.Value = "T"; // migrate the old default; Enter clashes with the game's interact key
+            MelonPreferences.Save();
+        }
+        if (!System.Enum.TryParse(_chatKey.Value, true, out _chatKeyCode)) _chatKeyCode = KeyCode.T;
         _blockUnfocused = cat.CreateEntry("BlockInputWhenUnfocused", true, description: "Stop the game reacting to your keyboard while its window is not focused (the game normally keeps reading keys in the background)");
         _chatFilter = cat.CreateEntry("ChatFilter", false, description: "Mask profanity in chat and player names you see (f***). Extra words: UserData\\NightRunnersMP-badwords.txt, one per line, trailing * = prefix");
         SetupChatFilter();
+
+        _prologueDir = cat.CreateEntry("PrologueDir", "", description: "Folder of your Steam Night Runners Prologue install (auto-detected when empty); needed to load its city into the alpha with F2");
+        _citySpawn = cat.CreateEntry("CitySpawn", "3.7,20.5,25.4", description: "Fallback spawn in Prologue coordinates x,y,z; normally the 'Start' marker found in the city scene is used");
+        _citySpawnYaw = cat.CreateEntry("CitySpawnYaw", 0f);
+        var cityLightmaps = cat.CreateEntry("CityLightmaps", true, description: "Import the Prologue's baked lightmaps for the city");
+        var cityLighting = cat.CreateEntry("CitySceneLighting", true, description: "Use the Prologue's ambient light and fog while in the city");
+        var citySkydome = cat.CreateEntry("CitySkydome", true, description: "Show the Prologue's panorama skydome (distant city/horizon) around the player");
+        var citySkybox = cat.CreateEntry("CitySkybox", true, description: "Use the Prologue's sky (cubemap) while in the city; its lower half is the ground tone under the expressway");
+        if (Game.Variant == GameVariant.Alpha)
+        {
+            var classData = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserLibsDirectory, "classdata.tpk");
+            _city = new CityMap(_prologueDir.Value, classData, Log)
+            {
+                SpawnYaw = _citySpawnYaw.Value,
+                UseLightmaps = cityLightmaps.Value,
+                UseSceneLighting = cityLighting.Value,
+                UseSkydome = citySkydome.Value,
+                UseSkybox = citySkybox.Value,
+                BookmarkFile = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, "NightRunnersMP-bookmarks.txt"),
+            };
+            var parts = _citySpawn.Value.Split(',');
+            if (parts.Length == 3 && float.TryParse(parts[0], out var sx) && float.TryParse(parts[1], out var sy) && float.TryParse(parts[2], out var sz))
+                _city.SpawnPoint = new Vector3(sx, sy, sz);
+        }
 
         if (_checkUpdates.Value) _updates.Start(Info.Version);
 
@@ -128,6 +163,91 @@ public class Core : MelonMod
         _chat.AddSystem(msg);
     }
 
+    private void CityKey()
+    {
+        if (_city == null) { Log("[city] F2 only applies to the alpha — in the Prologue you are already in the city"); return; }
+        switch (_city.Current)
+        {
+            case CityMap.State.Unloaded:
+            case CityMap.State.Failed:
+                if (LocalCar.Rcc == null) { Log("[city] get into a car in free-roam first, then press F2"); return; }
+                Log("[city] loading C1 Tatsumi from your Prologue install — the game will stutter for a while");
+                _city.TeleportWhenLoaded = true;
+                _city.BeginLoad();
+                break;
+            case CityMap.State.Loading:
+                Log($"[city] {_city.Status}");
+                break;
+            case CityMap.State.Loaded:
+                OpenTeleportPanel();
+                break;
+        }
+    }
+
+    private void OpenTeleportPanel()
+    {
+        if (_city == null || !_city.IsLoaded) return;
+        var entries = new List<TeleportPanel.Entry>
+        {
+            new() { Label = "Spawn road (near Tatsumi PA)", Action = () => { if (!_city.TeleportPlayer()) Log("[city] no car"); } },
+        };
+        foreach (var t in _city.Targets)
+        {
+            var target = t;
+            entries.Add(new TeleportPanel.Entry { Label = target.Label, Hint = target.Hint, Action = () => _city.TeleportToTarget(target) });
+        }
+        foreach (var kv in _city.Bookmarks)
+        {
+            var name = kv.Key; var pose = kv.Value;
+            entries.Add(new TeleportPanel.Entry { Label = $"★ {name}", Hint = "bookmark", Action = () => _city.TeleportToPrologueCoords(pose.prologue, pose.yaw) });
+        }
+        if (_city.HasReturnPose) entries.Add(new TeleportPanel.Entry { Label = "Back to Mount Haruna", Action = () => _city.TeleportBack() });
+        entries.Add(new TeleportPanel.Entry { Label = "Unload city", Hint = "frees memory; /tp back first if you want to keep your spot", Action = () => _city.Unload() });
+
+        _prevCursorLock = Cursor.lockState;
+        _prevCursorVisible = Cursor.visible;
+        _teleport.Show(entries);
+    }
+
+    private void CloseTeleportPanel()
+    {
+        _teleport.Close();
+        Cursor.lockState = _prevCursorLock;
+        Cursor.visible = _prevCursorVisible;
+    }
+
+    /// <summary>/tp … chat commands; returns a message for the chat box.</summary>
+    private string TeleportCommand(string[] parts)
+    {
+        if (_city == null) return "teleports only work in the alpha";
+        if (!_city.IsLoaded) return "load the city first (F2)";
+        if (parts.Length == 1 || parts[1] is "list" or "help")
+        {
+            var names = string.Join(", ", _city.Targets.ConvertAll(t => t.Label));
+            var marks = _city.Bookmarks.Count > 0 ? "   bookmarks: " + string.Join(", ", _city.Bookmarks.Keys) : "";
+            return $"/tp <area> | next | prev | back | save <name> | <name> | x y z   — areas: {names}{marks}";
+        }
+        var arg = parts[1].ToLowerInvariant();
+        switch (arg)
+        {
+            case "next": return _city.TeleportToNextRoad(1) ? "next road piece" : "no road surfaces";
+            case "prev": return _city.TeleportToNextRoad(-1) ? "previous road piece" : "no road surfaces";
+            case "back": case "haruna": return _city.TeleportBack() ? "back to Mount Haruna" : "no saved Haruna position (you haven't jumped yet)";
+            case "save":
+                if (parts.Length < 3) return "usage: /tp save <name>";
+                return _city.SaveBookmark(parts[2]) ? $"bookmark '{parts[2]}' saved" : "cannot save: not in a car";
+        }
+        if (parts.Length >= 4 && float.TryParse(parts[1], out var x) && float.TryParse(parts[2], out var y) && float.TryParse(parts[3], out var z))
+            return _city.TeleportToPrologueCoords(new Vector3(x, y, z), 0f) ? $"teleported to {x},{y},{z}" : "teleport failed";
+
+        var query = string.Join(' ', parts, 1, parts.Length - 1);
+        if (_city.Bookmarks.TryGetValue(query, out var bm))
+            return _city.TeleportToPrologueCoords(bm.prologue, bm.yaw) ? $"bookmark '{query}'" : "teleport failed";
+        var target = _city.FindTarget(query);
+        if (target != null) return _city.TeleportToTarget(target) ? $"→ {target.Label}" : "teleport failed";
+        return $"unknown place '{query}' — /tp list";
+    }
+
     /// <summary>Local slash commands typed into chat; returns true when handled (nothing is sent).</summary>
     private bool HandleChatCommand(string text)
     {
@@ -139,8 +259,42 @@ public class Core : MelonMod
                 if (parts.Length > 1 && parts[1] is "on" or "off") SetChatFilter(parts[1] == "on");
                 else _chat.AddSystem($"chat filter is {(Wire.Filter.Enabled ? "on" : "off")} — /filter on | /filter off");
                 break;
+            case "/city" when parts.Length > 1 && parts[1] == "unload":
+                if (_city != null) _city.Unload(); else _chat.AddSystem("no city loaded");
+                break;
+            case "/shot":
+            {
+                var dir = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, "NightRunnersMP-shots");
+                System.IO.Directory.CreateDirectory(dir);
+                var mode = parts.Length > 1 ? parts[1] : "";
+                var file = System.IO.Path.Combine(dir, $"shot-{mode}{System.DateTime.Now:yyyyMMdd-HHmmss}.png");
+                if (mode == "top" || mode == "side")
+                {
+                    var height = parts.Length > 2 && float.TryParse(parts[2], out var hh) ? hh : (mode == "top" ? 150f : 8f);
+                    var err = Ui.ShotCamera.Capture(file, mode, height);
+                    _chat.AddSystem(err ?? $"screenshot ({mode}) -> {file}");
+                }
+                else
+                {
+                    ScreenCapture.CaptureScreenshot(file);
+                    _chat.AddSystem($"screenshot -> {file}");
+                }
+                Log($"[shot] {file}");
+                break;
+            }
+            case "/city" when parts.Length > 2 && parts[1] == "skydome":
+                if (_city == null || !_city.IsLoaded) _chat.AddSystem("load the city first (F2)");
+                else { _city.SetSkydome(parts[2] == "on"); _chat.AddSystem($"skydome {(parts[2] == "on" ? "on" : "off")}"); }
+                break;
+            case "/city" when parts.Length > 2 && parts[1] == "lighting":
+                if (_city == null || !_city.IsLoaded) _chat.AddSystem("load the city first (F2)");
+                else { _city.SetSceneLighting(parts[2] == "on"); _chat.AddSystem($"Prologue ambient/fog {(parts[2] == "on" ? "on" : "off")}"); }
+                break;
+            case "/tp":
+                _chat.AddSystem(TeleportCommand(parts));
+                break;
             case "/help":
-                _chat.AddSystem("commands: /filter on|off   /help   — keys: F3 filter, F5 collisions, F6 traffic, F7 HUD, F8 disconnect");
+                _chat.AddSystem("commands: /tp …   /filter on|off   /city unload   /help   — keys: F2 city/teleport menu, F3 filter, F5 collisions, F6 traffic, F7 HUD, F8 disconnect");
                 break;
             default:
                 _chat.AddSystem($"unknown command {parts[0]} — try /help");
@@ -181,6 +335,25 @@ public class Core : MelonMod
                 CloseConnectPanel();
             }
         }
+        else if (_teleport.Open)
+        {
+            ShowCursor();
+            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _teleport.MoveSelection(-1);
+            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _teleport.MoveSelection(1);
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) _teleport.ConfirmSelection();
+            if (_teleport.Confirmed != null)
+            {
+                var entry = _teleport.Confirmed;
+                _teleport.Confirmed = null;
+                CloseTeleportPanel();
+                entry.Action();
+            }
+            else if (_teleport.CancelRequested || Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.F2))
+            {
+                _teleport.CancelRequested = false;
+                CloseTeleportPanel();
+            }
+        }
         else if (_chat.InputOpen)
         {
             if (_chat.SendRequested || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
@@ -196,7 +369,8 @@ public class Core : MelonMod
         }
         else
         {
-            if ((_host != null || _client != null) && Input.GetKeyDown(_chatKeyCode)) _chat.OpenInput();
+            if (Input.GetKeyDown(_chatKeyCode)) _chat.OpenInput(); // always: /tp and /city work outside sessions too
+            if (Input.GetKeyDown(KeyCode.F2)) CityKey();
             if (Input.GetKeyDown(KeyCode.F3)) SetChatFilter(!_chatFilter.Value);
             if (Input.GetKeyDown(KeyCode.F4)) OpenDownloadPage();
             if (Input.GetKeyDown(KeyCode.F5)) ToggleCollisions();
@@ -341,10 +515,11 @@ public class Core : MelonMod
     private float NearestPlayerDistance(Vector3 myPos)
     {
         var nearest = -1f;
+        var myWorld = WorldOrigin.ToWorld(myPos);
         foreach (var car in _ghosts.Cars)
         {
             if (!car.HasSnapshot) continue;
-            var d = Vector3.Distance(myPos, car.LastKnownPos);
+            var d = Vector3.Distance(myWorld, car.LastKnownPos);
             if (nearest < 0f || d < nearest) nearest = d;
         }
         return nearest;
@@ -353,7 +528,8 @@ public class Core : MelonMod
     // Move ghosts after the game's own Update so nothing overrides the pose this frame.
     public override void OnLateUpdate()
     {
-        if (_connectPanel.Open) ShowCursor(); // after the game's Update, in case it re-locked the cursor
+        _city?.UpdateSkydome();
+        if (_connectPanel.Open || _teleport.Open) ShowCursor(); // after the game's Update, in case it re-locked the cursor
         _ghosts.Update();
     }
 
@@ -383,11 +559,13 @@ public class Core : MelonMod
             : $"Client:   off  —  F12 to enter a host address (last: {_connectAddress.Value}:{_connectPort.Value})");
 
         _hudLines.Add($"Traffic:  {TrafficStatus()}   {(TrafficIsHostControlled ? "<color=#999999>(host-controlled)</color>" : $"(F6 toggles; config: {(_trafficEnabled.Value ? "on" : "off")})")}");
+        if (_city != null)
+            _hudLines.Add($"City:     {(_city.Current == CityMap.State.Loading ? "<color=#ff9933>" : _city.Current == CityMap.State.Loaded ? "<color=#88ff88>" : "")}{_city.Status}{(_city.Current is CityMap.State.Loading or CityMap.State.Loaded ? "</color>" : "")}   {(_city.IsLoaded ? $"(F2: teleport menu, or {_chatKey.Value} then /tp …)" : "(F2: load C1 Tatsumi from your Prologue)")}");
         _hudLines.Add($"Ghosts:   {_ghosts.Count}" + (_ghosts.Count == 0 ? "  (remote players appear here)" : ""));
         var playerPos = rcc != null ? rcc.transform.position : Vector3.zero;
         foreach (var car in _ghosts.Cars)
         {
-            var dist = car.HasSnapshot && rcc != null ? Vector3.Distance(playerPos, car.LastKnownPos) : -1f;
+            var dist = car.HasSnapshot && rcc != null ? Vector3.Distance(WorldOrigin.ToWorld(playerPos), car.LastKnownPos) : -1f;
             var age = car.LastSnapshotAge;
             var state = car.IsSpawned ? "<color=#88ff88>spawned</color>" : "<color=#ff9933>waiting for spawn</color>";
             var packets = float.IsNaN(age) ? "no packets yet" : age > 1f ? $"<color=#ff5555>last packet {age:F1}s ago</color>" : $"packets OK ({age * 1000f:F0} ms)";
@@ -403,12 +581,14 @@ public class Core : MelonMod
         _hudLines.Add($"Send:     {sendInfo}");
         var collisionsOn = _hostCollisions ?? _ghostCollisions.Value;
         _hudLines.Add($"Collisions: {(collisionsOn ? "<color=#88ff88>ON — cars are solid</color>" : "off — cars pass through")}   {(CollisionsAreHostControlled ? "<color=#999999>(host-controlled)</color>" : "(F5 toggles)")}");
-        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m    Filter {(Wire.Filter.Enabled ? "on" : "off")}    Input: {(GameInput.Suspended ? "<color=#ff9933>game keys paused</color>" : "live")}");
+        var origin = WorldOrigin.Offset;
+        _hudLines.Add($"Options:  InterpDelay ≥{_interpDelayMs.Value} ms    LoopbackOffset {_ghostOffset.Value} m    Filter {(Wire.Filter.Enabled ? "on" : "off")}    Input: {(GameInput.Suspended ? "<color=#ff9933>game keys paused</color>" : "live")}{(origin != Vector3.zero ? $"    origin shift ({origin.x:F0}, {origin.y:F0}, {origin.z:F0})" : "")}");
         _hudLines.Add($"Keys:     F11 host   F12 connect   F8 disconnect   {_chatKey.Value} chat   F3 filter   F5 collisions   F6 traffic   F9 status→log   F7 hide HUD   F4 download page");
 
         _hud.Draw(HudTitle(), _hudLines);
         _chat.Draw();
         _connectPanel.Draw();
+        _teleport.Draw();
     }
 
     private void SendChatFromPanel()
@@ -498,7 +678,7 @@ public class Core : MelonMod
         if (!host.Start()) return;
         WireSessionEvents(host);
         _host = host;
-        _chat.AddSystem($"hosting on UDP {_hostPort.Value} — Enter opens chat");
+        _chat.AddSystem($"hosting on UDP {_hostPort.Value} — {_chatKey.Value} opens chat");
     }
 
     private void OpenConnectPanel()
@@ -582,7 +762,7 @@ public class Core : MelonMod
         {
             WireSessionEvents(client);
             client.RulesReceived += OnHostRules;
-            _chat.AddSystem($"connecting to {addr} — Enter opens chat");
+            _chat.AddSystem($"connecting to {addr} — {_chatKey.Value} opens chat");
         }
         client.Start();
         _client = client;
@@ -611,7 +791,7 @@ public class Core : MelonMod
 
         Log("--- F9 status ---");
         Log($"carParent: {(carParent != null ? "OK" : "null")}");
-        Log($"local car: {(rcc != null ? $"{rcc.gameObject.name} model={LocalCar.ModelOf(rcc)} @ {rcc.transform.position}" : "none")}");
+        Log($"local car: {(rcc != null ? $"{rcc.gameObject.name} model={LocalCar.ModelOf(rcc)} @ {rcc.transform.position} (origin offset {WorldOrigin.Offset}, world {WorldOrigin.ToWorld(rcc.transform.position)})" : "none")}");
         Log($"host: {(_host != null ? _host.Status : "off")}   client: {(_client != null ? _client.Status : "off")}   ghosts: {_ghosts.Count}");
     }
 }
